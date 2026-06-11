@@ -142,9 +142,14 @@ app.post('/api/users', requireRole('admin'), function(req, res) {
 });
 app.put('/api/users/:id', requireRole('admin'), function(req, res) {
   var b = req.body, bcrypt = require('bcryptjs');
-  var sets = ["role='" + safe(b.role) + "'", "real_name='" + safe(b.real_name) + "'"];
+  var sets = [];
+  if (b.role) sets.push("role='" + safe(b.role) + "'");
+  if (b.real_name) sets.push("real_name='" + safe(b.real_name) + "'");
   if (b.password) sets.push("password='" + bcrypt.hashSync(b.password,10) + "'");
-  if (b.team_id) sets.push("team_id=" + safeNum(b.team_id)); else sets.push("team_id=NULL");
+  if (b.team_id !== undefined) {
+    sets.push("team_id=" + (b.team_id ? safeNum(b.team_id) : 'NULL'));
+  }
+  if (!sets.length) return res.json({ success: false, msg: '没有要更新的字段' });
   dbRun("UPDATE users SET " + sets.join(',') + " WHERE id=" + req.params.id);
   res.json({ success: true });
 });

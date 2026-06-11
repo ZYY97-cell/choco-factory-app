@@ -1417,7 +1417,8 @@ async function renderAdmin() {
         ${users.map(u => `
           <div class="admin-item">
             <div><span class="item-name">${u.real_name}</span>
-            <span style="font-size:12px;color:var(--text-secondary);margin-left:6px">${u.username} · ${{clerk:'文员',supervisor:'组长',team:'班组',qc:'质检',packaging:'打包',admin:'管理员',console:'总台',finance:'财务',warehouse:'仓库'}[u.role]}</span></div>
+            <span style="font-size:12px;color:var(--text-secondary);margin-left:6px">${u.username} · ${{clerk:'文员',supervisor:'组长',team:'班组',qc:'质检',packaging:'打包',admin:'管理员',console:'总台',finance:'财务',warehouse:'仓库',warehouse_admin:'仓库主管',procurement:'采购',preparation:'配料'}[u.role]||u.role}</span></div>
+            <div class="item-actions"><button class="btn btn-outline btn-sm" onclick="editUser(${u.id},'${u.real_name}')">改密</button></div>
           </div>
         `).join('')}
       </div>
@@ -1460,6 +1461,17 @@ async function saveSettings() {
   const order_prefix = $('#inp-order-prefix').value.trim();
   await API.put('/api/settings', { dispatch_threshold: threshold, order_prefix });
   showToast('设置已保存', 'success');
+}
+async function editUser(id, name) {
+  var pw = prompt('为「' + name + '」设置新密码（留空则不改）：');
+  if (pw === null) return;
+  if (pw === '') { showToast('未修改', 'warning'); return; }
+  if (pw.length < 4) { showToast('密码至少4位', 'error'); return; }
+  var rp = prompt('再次输入新密码确认：');
+  if (rp !== pw) { showToast('两次输入不一致', 'error'); return; }
+  await API.put('/api/users/' + id, { password: pw });
+  showToast('密码已更新', 'success');
+  navigate('admin');
 }
 
 // ===== 底部导航栏 =====
