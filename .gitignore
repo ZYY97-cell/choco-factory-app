@@ -1,0 +1,11 @@
+node_modules/
+*.db
+*.db-journal
+uploads/
+cookies.txt
+generate-server.js
+.workbuddy/
+全模块完整设计-v4.0-Master.md
+采购模块设计-v2.0.md
+采购模块设计-v3.0.md
+需求梳理与界面文案-v2.0.md
