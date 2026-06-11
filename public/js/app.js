@@ -1,4 +1,5 @@
 // ===== 巧克力工厂生产管控 - 前端核心逻辑（v2） =====
+console.log('app.js loaded, v2.1');
 
 const API = {
   async request(url, options = {}) {

@@ -43,7 +43,16 @@
       <div>加载中...</div>
     </div>
   </div>
-  <script src="/js/app.js?v=2" onerror="document.getElementById('loading-screen').innerHTML='<div style=text-align:center;padding:40px><p>应用加载失败</p><p style=font-size:12px;color:#999>请刷新页面重试，或清除浏览器缓存</p></div>'"></script>
+  <script>
+    // 兜底安全网：5秒后如果还在加载，直接显示登录页
+    setTimeout(function(){
+      var el = document.getElementById('loading-screen');
+      if (el && el.parentNode) {
+        el.parentNode.innerHTML = '<div class="login-page"><div class="login-logo">🍫</div><div class="login-title">巧克力工厂生产管控</div><div class="login-subtitle">全流程线上流转管理系统</div><div class="login-form"><div class="form-group"><label>账号</label><input class="form-input" id="fb-username" placeholder="请输入用户名" autocomplete="username"></div><div class="form-group"><label>密码</label><input class="form-input" id="fb-password" type="password" placeholder="请输入密码"></div><button class="btn btn-primary" onclick="var x=document.getElementById(\'fb-username\').value.trim();var p=document.getElementById(\'fb-password\').value.trim();fetch(\'/api/login\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({username:x,password:p})}).then(function(r){return r.json()}).then(function(d){if(d.success){location.reload()}else{alert(d.msg||\'登录失败\')}})">登 录</button></div></div>';
+      }
+    }, 5000);
+  </script>
+  <script src="/js/app.js?v=3" onerror="document.getElementById('loading-screen').innerHTML='<div style=text-align:center;padding:40px><p>应用加载失败</p><p style=font-size:12px;color:#999>请刷新页面重试，或清除浏览器缓存</p></div>'"></script>
   <script>
     // 清除旧版 Service Worker
     if ('serviceWorker' in navigator) {
