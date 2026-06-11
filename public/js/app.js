@@ -137,7 +137,7 @@ async function doLogin() {
   if (res.success) {
     currentUser = res.user;
     showToast('登录成功', 'success');
-    loadNotifications();
+    try { loadNotifications(); } catch(e) {}
     navigate('dashboard');
   } else {
     showToast(res.msg || '登录失败', 'error');
@@ -146,6 +146,7 @@ async function doLogin() {
 
 // ===== 仪表板 =====
 async function renderDashboard() {
+  try {
   const roleTabs = {
     clerk: [
       { id: 'clerk-orders', icon: '📋', label: '订单管理' },
@@ -250,6 +251,10 @@ async function renderDashboard() {
       </div>
     </div>
     ${renderTabBar('dashboard')}`;
+  } catch(e) {
+    console.error('renderDashboard error:', e);
+    $('#app').innerHTML = '<div class="page-header"><h1>🍫 巧克力工厂</h1></div><div class="page-content"><div class="empty-state"><div class="empty-icon">⚠️</div>数据加载失败，请刷新页面重试</div></div>';
+  }
 }
 
 async function doLogout() {

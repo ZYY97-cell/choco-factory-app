@@ -517,6 +517,28 @@ app.post('/api/outbound-orders/:id/images', upload.array('images',5), requireRol
   res.json({ success: true, images: imgs });
 });
 
+// 统计总览
+app.get('/api/stats/overview', requireLogin, function(req, res) {
+  var uid = req.session.user.id, role = req.session.user.role;
+  var result = {};
+  // 总订单数
+  var r1 = dbQuery("SELECT COUNT(*) as c FROM orders");
+  if (r1[0]) result.total = r1[0].values[0][0];
+  // 待派单
+  var r2 = dbQuery("SELECT COUNT(*) as c FROM orders WHERE status='pending'");
+  if (r2[0]) result.pending = r2[0].values[0][0];
+  // 生产中
+  var r3 = dbQuery("SELECT COUNT(*) as c FROM orders WHERE status='producing'");
+  if (r3[0]) result.producing = r3[0].values[0][0];
+  // 已完工
+  var r4 = dbQuery("SELECT COUNT(*) as c FROM orders WHERE status='completed'");
+  if (r4[0]) result.completed = r4[0].values[0][0];
+  // 质检中
+  var r5 = dbQuery("SELECT COUNT(*) as c FROM orders WHERE status='inspecting'");
+  if (r5[0]) result.inspecting = r5[0].values[0][0];
+  res.json(result);
+});
+
 // 通知
 app.get('/api/notifications', requireLogin, function(req, res) {
   var uid = req.session.user.id, role = req.session.user.role;
