@@ -322,7 +322,7 @@ app.post('/api/product-items', requireRole('admin','clerk'), function(req, res) 
 
 // ===== 订单（含配件库存抵扣）=====
 app.get('/api/orders', requireLogin, function(req, res) {
-  var sql = "SELECT o.*,c.name as customer_name,p.name as product_name,p.items_per_box,u.real_name as creator_name FROM orders o LEFT JOIN customers c ON o.customer_id=c.id LEFT JOIN products p ON o.product_id=p.id LEFT JOIN users u ON o.created_by=u.id WHERE 1=1";
+  var sql = "SELECT o.*,c.name as customer_name,p.name as product_name,p.items_per_box,u.real_name as creator_name,d.team_id,d.product_id as dispatch_product_id,d.dispatched_at as dispatch_time,t.name as team_name FROM orders o LEFT JOIN customers c ON o.customer_id=c.id LEFT JOIN products p ON o.product_id=p.id LEFT JOIN users u ON o.created_by=u.id LEFT JOIN dispatches d ON o.id=d.order_id LEFT JOIN teams t ON d.team_id=t.id WHERE 1=1";
   if (req.query.status) sql += " AND o.status='" + safe(req.query.status) + "'";
   sql += " ORDER BY o.id DESC";
   var orders = rowsToObjects(dbQuery(sql));
@@ -334,6 +334,8 @@ app.get('/api/orders', requireLogin, function(req, res) {
       it.children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + it.product_id + " ORDER BY sort_order"));
         it.images = rowsToObjects(dbQuery("SELECT * FROM product_images WHERE product_id=" + it.product_id + " ORDER BY sort_order"));
     });
+    // 获取该订单的所有派单记录（支持多产品拆分派单）
+    o.dispatches = rowsToObjects(dbQuery("SELECT d.*,t.name as team_name FROM dispatches d LEFT JOIN teams t ON d.team_id=t.id WHERE d.order_id=" + o.id));
   });
   res.json(orders);
 });
@@ -421,12 +423,37 @@ app.put('/api/orders/:id/status', requireRole('admin','clerk'), function(req, re
 
 // 派单
 app.post('/api/orders/:id/dispatch', requireRole('supervisor','admin'), function(req, res) {
-  var tid = safeNum(req.body.team_id);
-  dbRun("INSERT INTO dispatches (order_id,team_id,dispatched_by) VALUES (" + req.params.id + "," + tid + "," + req.session.user.id + ")");
-  dbRun("UPDATE orders SET status='dispatched',updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
-  var orderNo = rowToObject(dbQuery("SELECT order_no FROM orders WHERE id=" + req.params.id));
-  addNotif('team', null, 'new_dispatch', '新派单', '您有新的生产任务，订单#' + (orderNo ? orderNo.order_no : req.params.id), req.params.id);
-  addLog(req.session.user.id, 'dispatch', '派单至班组' + tid, req.params.id);
+  var b = req.body;
+  // 支持多产品拆分派单：items=[{team_id,product_id},...] 或单产品派单：team_id
+  var items = b.items || (b.team_id ? [{ team_id: safeNum(b.team_id), product_id: b.product_id ? safeNum(b.product_id) : null }] : []);
+  if (!items.length) return res.json({ success: false, msg: '请选择班组' });
+
+  var allDispatched = true;
+  items.forEach(function(it) {
+    var pid = it.product_id || 'NULL';
+    var pidSql = it.product_id ? "," + it.product_id : ",NULL";
+    dbRun("INSERT INTO dispatches (order_id,team_id,product_id,dispatched_by,notes) VALUES (" + req.params.id + "," + it.team_id + pidSql + "," + req.session.user.id + ",'" + safe(b.notes||'') + "')");
+    // 通知对应班组
+    var tidStr = String(it.team_id);
+    addNotif('team', null, 'new_dispatch', '新派单', '您有新的生产任务，订单#' + req.params.id + (it.product_id ? ' 产品#' + it.product_id : ''), req.params.id);
+  });
+
+  // 检查是否所有产品都已分配（如果是多产品订单且拆分派单）
+  var order = rowToObject(dbQuery("SELECT o.* FROM orders o WHERE o.id=" + req.params.id));
+  if (order) {
+    var orderItems = rowsToObjects(dbQuery("SELECT * FROM order_items WHERE order_id=" + req.params.id));
+    if (orderItems.length > 0) {
+      var dispatchedPids = rowsToObjects(dbQuery("SELECT DISTINCT product_id FROM dispatches WHERE order_id=" + req.params.id)).map(function(d){return d.product_id;});
+      // 如果所有产品都分配了，或者分配了null（整单分配），标记为dispatched
+      if (dispatchedPids.indexOf(null) >= 0 || (orderItems.length > 0 && orderItems.every(function(oi){return dispatchedPids.indexOf(oi.product_id)>=0;}))) {
+        dbRun("UPDATE orders SET status='dispatched',updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
+      }
+    } else {
+      dbRun("UPDATE orders SET status='dispatched',updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
+    }
+  }
+
+  addLog(req.session.user.id, 'dispatch', '派单 共' + items.length + '项', req.params.id);
   res.json({ success: true });
 });
 

@@ -585,40 +585,61 @@ async function openDispatch(orderId) {
   var ds = await API.get('/api/dispatch-stats');
   var dispatchStats = ds.stats || ds;
   var threshold = ds.threshold || 3;
+  var items = order.items || [];
+  var hasMulti = items.length > 1;
   
-  const modal = document.createElement('div');
+  var modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.id = 'dispatch-modal';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>📌 派单 - ${order.order_no}</h3>
-        <button class="modal-close" onclick="closeModal()">&times;</button>
-      </div>
-      <div class="detail-section" style="margin-bottom:12px">
-        <div class="detail-row"><span class="label">客户</span><span class="value">${order.customer_name}</span></div>
-        <div class="detail-row"><span class="label">产品</span><span class="value">${order.product_name}</span></div>
-        <div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:700;color:var(--primary)">${order.quantity}</span></div>
-      </div>
-      <h4 style="margin-bottom:8px">选择生产班组：</h4>
-      <div id="dispatch-teams">
-        ${teams.map(t => {
-          const stat = dispatchStats.find(s => s.team_id === t.id) || { dispatch_count: 0, total_quantity: 0 };
-          const otherMin = Math.min(...dispatchStats.filter(s => s.team_id !== t.id).map(s => s.dispatch_count));
-          const isWarning = stat.dispatch_count - otherMin >= threshold;
-          return `
-            <div class="team-dispatch-card ${isWarning ? 'warning' : ''}" onclick="selectTeam(this, ${t.id})" data-team-id="${t.id}">
-              <div class="team-info">
-                <div class="team-name">${t.name} ${isWarning ? '<span class="warning-badge">⚠️ 偏多</span>' : ''}</div>
-                <div class="team-stats">本月接单：${stat.dispatch_count} 次 | 累计产量：${stat.total_quantity || 0}</div>
-              </div>
-              <div style="font-size:20px;color:var(--border)">○</div>
-            </div>`;
-        }).join('')}
-      </div>
-      <button class="btn btn-primary btn-block" style="margin-top:16px" onclick="confirmDispatch()">确认派单</button>
-    </div>`;
   
+  var renderTeamCard = function(t, extra) {
+    var stat = dispatchStats.find(function(s){return s.team_id===t.id;}) || { dispatch_count: 0, total_quantity: 0 };
+    var otherMin = Math.min.apply(null, dispatchStats.filter(function(s){return s.team_id!==t.id;}).map(function(s){return s.dispatch_count;}));
+    var isWarning = stat.dispatch_count - otherMin >= threshold;
+    return '<div class="team-dispatch-card '+(isWarning?'warning':'')+'" onclick="selectTeam(this,'+t.id+','+(extra||'\'')+')" data-team-id="'+t.id+'" data-extra="'+(extra||'')+'">' +
+      '<div class="team-info"><div class="team-name">'+esc(t.name)+' '+(isWarning?'<span class="warning-badge">⚠️ 偏多</span>':'')+'</div>' +
+      '<div class="team-stats">本月接单：'+stat.dispatch_count+' 次 | 累计产量：'+(stat.total_quantity||0)+'</div></div>' +
+      '<div style="font-size:20px;color:var(--border)">○</div></div>';
+  };
+
+  if (hasMulti) {
+    // 多产品模式：显示每个产品 + 班组选择，也支持整体分配
+    var prodRows = items.map(function(it, i) {
+      return '<div style="margin-bottom:12px;padding:10px;background:#fdf8f3;border-radius:8px">' +
+        '<div style="font-weight:700;margin-bottom:6px">📦 产品'+(i+1)+': '+esc(it.product_name)+' ×'+it.quantity+'</div>' +
+        '<div style="margin-bottom:4px;font-size:12px;color:var(--text-secondary)">选择班组：</div>' +
+        '<div id="dispatch-teams-'+i+'">' + teams.map(function(t){return renderTeamCard(t, 'item_'+i);}).join('') + '</div></div>';
+    }).join('');
+    
+    // 整体分配模式
+    var allRow = '<div style="margin-bottom:12px;padding:10px;background:#e8f5e9;border-radius:8px;border:2px dashed var(--success)">' +
+      '<div style="font-weight:700;margin-bottom:4px;color:var(--success)">🎯 整体分配（所有产品给同一班组）</div>' +
+      '<div style="margin-bottom:4px;font-size:12px;color:var(--text-secondary)">点击下方班组即可一次性分配全部产品</div>' +
+      '<div id="dispatch-teams-all">' + teams.map(function(t){return renderTeamCard(t, 'all');}).join('') + '</div></div>';
+
+    modal.innerHTML = '<div class="modal-content"><div class="modal-header"><h3>📌 派单 - '+esc(order.order_no)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>' +
+      '<div class="detail-section" style="margin-bottom:12px"><div class="detail-row"><span class="label">客户</span><span class="value">'+esc(order.customer_name)+'</span></div>' +
+      '<div class="detail-row"><span class="label">总数量</span><span class="value" style="font-weight:700;color:var(--primary)">'+order.quantity+'</span></div></div>' +
+      '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">💡 可逐个产品拆分给不同班组，或使用"整体分配"一次分配全部</div>' +
+      prodRows + allRow +
+      '<button class="btn btn-primary btn-block" style="margin-top:12px" onclick="confirmDispatch()">确认派单</button></div>';
+    
+    window._dispatchMulti = true;
+    window._dispatchItems = items;
+    // 存储每个产品/整体的选中班组：{ 'item_0': teamId, 'all': teamId }
+    window._dispatchSelections = {};
+  } else {
+    // 单产品模式（原逻辑）
+    modal.innerHTML = '<div class="modal-content"><div class="modal-header"><h3>📌 派单 - '+esc(order.order_no)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>' +
+      '<div class="detail-section" style="margin-bottom:12px"><div class="detail-row"><span class="label">客户</span><span class="value">'+esc(order.customer_name)+'</span></div>' +
+      '<div class="detail-row"><span class="label">产品</span><span class="value">'+esc(order.product_name)+'</span></div>' +
+      '<div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:700;color:var(--primary)">'+order.quantity+'</span></div></div>' +
+      '<h4 style="margin-bottom:8px">选择生产班组：</h4>' +
+      '<div id="dispatch-teams">' + teams.map(function(t){return renderTeamCard(t, 'single');}).join('') + '</div>' +
+      '<button class="btn btn-primary btn-block" style="margin-top:16px" onclick="confirmDispatch()">确认派单</button></div>';
+    window._dispatchMulti = false;
+  }
+
   document.body.appendChild(modal);
   window._selectedTeamId = null;
   } catch(e) {
@@ -627,20 +648,51 @@ async function openDispatch(orderId) {
   }
 }
 
-function selectTeam(el, teamId) {
-  $$('.team-dispatch-card').forEach(c => c.classList.remove('selected'));
+function selectTeam(el, teamId, extra) {
+  var cards = el.parentElement.querySelectorAll('.team-dispatch-card');
+  cards.forEach(function(c) { c.classList.remove('selected'); });
   el.classList.add('selected');
-  window._selectedTeamId = teamId;
+  
+  if (window._dispatchMulti) {
+    if (!window._dispatchSelections) window._dispatchSelections = {};
+    window._dispatchSelections[extra || 'single'] = teamId;
+  } else {
+    window._selectedTeamId = teamId;
+  }
 }
 
 async function confirmDispatch() {
-  if (!window._selectedTeamId) return showToast('请选择一个班组', 'error');
-  const res = await API.post(`/api/orders/${window._dispatchOrderId}/dispatch`, { team_id: window._selectedTeamId });
-  if (res.success) {
-    if (res.warning) showToast(res.warningMsg, 'warning');
-    else showToast('派单成功', 'success');
-    closeModal();
-    navigate('supervisor-pending');
+  if (window._dispatchMulti) {
+    // 多产品派单模式
+    var sels = window._dispatchSelections || {};
+    var items = [];
+    // 检查整体分配
+    if (sels.all) {
+      var itms = window._dispatchItems || [];
+      itms.forEach(function(it) {
+        items.push({ team_id: sels.all, product_id: it.product_id });
+      });
+    } else {
+      // 逐个产品分配
+      var itms = window._dispatchItems || [];
+      var hasAny = false;
+      itms.forEach(function(it, i) {
+        if (sels['item_'+i]) {
+          items.push({ team_id: sels['item_'+i], product_id: it.product_id });
+          hasAny = true;
+        }
+      });
+    }
+    if (!items.length) return showToast('请至少为一个产品选择班组', 'error');
+    
+    var res = await API.post('/api/orders/'+window._dispatchOrderId+'/dispatch', { items: items });
+    if (res.success) { showToast('派单成功（'+items.length+'项）', 'success'); closeModal(); navigate('supervisor-pending'); }
+    else showToast(res.msg || '派单失败', 'error');
+  } else {
+    if (!window._selectedTeamId) return showToast('请选择一个班组', 'error');
+    var res = await API.post('/api/orders/'+window._dispatchOrderId+'/dispatch', { team_id: window._selectedTeamId });
+    if (res.success) { showToast('派单成功', 'success'); closeModal(); navigate('supervisor-pending'); }
+    else showToast(res.msg || '派单失败', 'error');
   }
 }
 
@@ -656,22 +708,27 @@ async function renderRequisition() {
   var rm = await API.get('/api/raw-materials');
   var im = await API.get('/api/inner-pack-materials');
   var am = await API.get('/api/product-accessories');
+  var role = currentUser.role;
+  var roleLabel = role === 'qc' ? '内包质检' : role === 'supervisor' ? '生产组长' : '物料申请';
+  var tabId = role === 'qc' ? 'qc-requisition' : 'supervisor-requisition';
+  var backPage = role === 'qc' ? 'qc-list' : 'supervisor-pending';
   
   $('#app').innerHTML = `
-    <div class="page-header"><h1>📋 物料领料申请</h1><span class="role-badge">生产组长</span></div>
+    <div class="page-header"><h1>📋 物料领料申请</h1><span class="role-badge">${roleLabel}</span></div>
     <div class="page-content">
       <div class="form-group"><label>领料类型</label><select class="form-input" id="req-type" onchange="onReqTypeChange()">
         <option value="raw">🧈 原材料</option><option value="inner">📥 内包材</option><option value="aux">🔧 辅料/配件</option>
       </select></div>
       <div class="form-group"><label>选择物料</label><select class="form-input" id="req-material">
-        ${rm.map(function(m){ return '<option value="raw_'+m.id+'">'+m.name+' (库存:'+(m.stock_qty||0)+')</option>'; }).join('')}
+        ${rm.map(function(m){ return '<option value="raw_'+m.id+'">'+esc(m.name)+' (库存:'+(m.stock_qty||0)+')</option>'; }).join('')}
       </select></div>
       <div class="form-group"><label>领料数量</label><input class="form-input" id="req-qty" type="number" min="1"></div>
       <div class="form-group"><label>用途说明</label><input class="form-input" id="req-note" placeholder="关联订单或用途"></div>
       <button class="btn btn-primary btn-block" onclick="submitRequisition()">提交领料申请</button>
     </div>
-    ${renderTabBar('supervisor-requisition')}`;
+    ${renderTabBar(tabId)}`;
   window._reqMaterials = { raw: rm, inner: im, aux: am };
+  window._reqBackPage = backPage;
 }
 function onReqTypeChange() {
   var t = document.getElementById('req-type').value;
@@ -688,7 +745,7 @@ async function submitRequisition() {
   var note = document.getElementById('req-note').value.trim();
   if (!mid || !qty || qty < 1) return showToast('请完善领料信息', 'error');
   var res = await API.post('/api/material-requisitions', { type: type, material_id: mid, quantity: qty, note: note });
-  if (res.success) { showToast('领料申请已提交', 'success'); navigate('supervisor-pending'); }
+  if (res.success) { showToast('领料申请已提交', 'success'); navigate(window._reqBackPage||'supervisor-pending'); }
   else showToast(res.msg || '提交失败', 'error');
 }
 
@@ -722,24 +779,38 @@ async function renderSupervisorStats() {
 
 // ===== 生产班组端 =====
 async function renderTeamOrders() {
-  const orders = await API.get('/api/orders');
-  const myOrders = orders.filter(o => o.team_id === currentUser.team_id && ['dispatched'].includes(o.status));
+  var orders = await API.get('/api/orders');
+  // 过滤分配给当前班组的订单（支持多产品拆分派单）
+  var myOrders = orders.filter(function(o) {
+    if (o.status !== 'dispatched' && o.status !== 'dispatched_partial') return false;
+    // 检查是否有派单记录给当前班组
+    var dispatches = o.dispatches || [];
+    if (!dispatches.length && o.team_id === currentUser.team_id) return true;
+    return dispatches.some(function(d) { return d.team_id === currentUser.team_id; });
+  });
   
   $('#app').innerHTML = `
     <div class="page-header"><h1>🏭 待生产订单</h1><span class="role-badge">班组${currentUser.team_id}</span></div>
     <div class="page-content">
       ${!myOrders.length ? '<div class="empty-state"><div class="empty-icon">📭</div>暂无待生产订单</div>' :
-        myOrders.map(o => `
-          <div class="order-item" onclick="startProduction(${o.id})">
-            <div class="order-item-header">
-              <span class="order-customer">${o.customer_name}</span>
-              ${statusTag(o.status)}
-            </div>
-            <div class="order-product">${o.product_name}</div>
-            <div class="order-footer"><span class="order-no">${o.order_no}</span><span class="order-qty">下单 ${o.quantity}</span></div>
-            <div style="margin-top:6px"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startProduction(${o.id})">开始填报</button></div>
-          </div>
-        `).join('')}
+        myOrders.map(function(o) {
+          // 显示当前班组被分配的明细
+          var myDispatch = (o.dispatches||[]).find(function(d){return d.team_id===currentUser.team_id;}) || {};
+          var productHint = '';
+          if (myDispatch.product_id) {
+            var prodName = '';
+            (o.items||[]).forEach(function(it){ if (it.product_id === myDispatch.product_id) prodName = it.product_name; });
+            if (!prodName && o.product_id === myDispatch.product_id) prodName = o.product_name;
+            productHint = '<div style="font-size:11px;color:var(--accent);margin-top:2px">分配产品: '+(prodName||'产品#'+myDispatch.product_id)+'</div>';
+          }
+          return '<div class="order-item" onclick="startProduction('+o.id+')">' +
+            '<div class="order-item-header"><span class="order-customer">'+esc(o.customer_name)+'</span>'+statusTag(o.status)+'</div>' +
+            '<div class="order-product">'+esc(o.product_name)+'</div>' +
+            productHint +
+            '<div class="order-footer"><span class="order-no">'+esc(o.order_no)+'</span><span class="order-qty">下单 '+o.quantity+'</span></div>' +
+            '<div style="margin-top:6px"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startProduction('+o.id+')">开始填报</button></div>' +
+            '</div>';
+        }).join('')}
     </div>
     ${renderTabBar('team-list')}`;
 }
@@ -1875,17 +1946,20 @@ function renderTabBar(activeTab) {
       { id: 'dashboard', icon: '🏠', label: '首页' },
       { id: 'supervisor-pending', icon: '📥', label: '待派单' },
       { id: 'supervisor-stats', icon: '📊', label: '统计' },
+      { id: 'stats', icon: '📈', label: '数据' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     team: [
       { id: 'dashboard', icon: '🏠', label: '首页' },
       { id: 'team-list', icon: '🏭', label: '生产' },
       { id: 'team-rework', icon: '🔄', label: '补产' },
+      { id: 'stats', icon: '📊', label: '统计' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     qc: [
       { id: 'dashboard', icon: '🏠', label: '首页' },
       { id: 'qc-list', icon: '🔍', label: '质检' },
+      { id: 'qc-requisition', icon: '📋', label: '领料' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],

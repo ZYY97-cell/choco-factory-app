@@ -656,6 +656,8 @@ function createTables() {
   try { db.run("ALTER TABLE procurement_orders ADD COLUMN quote_url TEXT"); } catch(e) {}
   try { db.run("ALTER TABLE procurement_orders ADD COLUMN order_date TEXT"); } catch(e) {}
   try { db.run("ALTER TABLE procurement_orders ADD COLUMN unit_price REAL"); } catch(e) {}
+  try { db.run("ALTER TABLE dispatches ADD COLUMN product_id INTEGER"); } catch(e) {}
+  try { db.run("ALTER TABLE dispatches ADD COLUMN notes TEXT"); } catch(e) {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS suppliers (
