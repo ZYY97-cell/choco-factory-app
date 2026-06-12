@@ -73,6 +73,7 @@ function navigate(page) {
     case 'supervisor-pending': renderSupervisorPending(); break;
     case 'supervisor-dispatch': renderSupervisorDispatch(); break;
     case 'supervisor-stats': renderSupervisorStats(); break;
+    case 'supervisor-requisition': renderRequisition(); break;
     case 'team-list': renderTeamOrders(); break;
     case 'team-produce': renderTeamProduce(); break;
     case 'team-rework': renderTeamRework(); break;
@@ -156,7 +157,8 @@ async function renderDashboard() {
     ],
     supervisor: [
       { id: 'supervisor-pending', icon: '📥', label: '待派单' },
-      { id: 'supervisor-stats', icon: '📊', label: '派单统计' },
+      { id: 'supervisor-stats', icon: '📊', label: '统计' },
+      { id: 'supervisor-requisition', icon: '📋', label: '领料' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📈', label: '数据' }
     ],
@@ -508,32 +510,55 @@ async function renderOrderDetail(role) {
 
 // ===== 生产组长端 =====
 async function renderSupervisorPending() {
-  const orders = await API.get('/api/orders?status=pending');
+  var orders = await API.get('/api/orders?status=pending');
+  var allOrders = await API.get('/api/orders');
+  var overview = await API.get('/api/stats/overview');
+  var ims = await API.get('/api/inner-pack-materials');
+  var preps = await API.get('/api/preparations');
+  
+  // 内包材库存总计
+  var innerStock = ims.reduce(function(s,m){ return s + (m.stock_qty||0); }, 0);
+  
+  // 检查配料状态
+  var prepMap = {};
+  preps.forEach(function(p){ prepMap[p.order_id] = true; });
+  
+  // 统计生产中订单
+  var producing = allOrders.filter(function(o){ return o.status === 'producing'; });
   
   $('#app').innerHTML = `
-    <div class="page-header">
-      <h1>📥 待派单订单</h1>
-      <span class="role-badge">生产组长</span>
-    </div>
+    <div class="page-header"><h1>📥 待派单</h1><span class="role-badge">生产组长</span></div>
     <div class="page-content">
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card"><div class="stat-value">${overview.total||0}</div><div class="stat-label">总订单</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#D48806">${overview.pending||0}</div><div class="stat-label">待派单</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#1890FF">${producing.length}</div><div class="stat-label">生产中</div></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap">
+        <span>📦 内包材库存: <strong style="color:${innerStock<100?'var(--danger)':'var(--success)'}">${innerStock}</strong></span>
+      </div>
       ${!orders.length ? '<div class="empty-state"><div class="empty-icon">📭</div>暂无待派单订单</div>' :
-        orders.map(o => `
-          <div class="order-item ${o.is_urgent ? 'urgent' : ''}" onclick="openDispatch(${o.id})">
+        orders.map(function(o){
+          var innerNeed = (o.inner_pack_qty||1) * (o.quantity||0);
+          var stockWarn = innerNeed > innerStock;
+          var prepDone = prepMap[o.id];
+          return `<div class="order-item ${o.is_urgent?'urgent':''}" onclick="openDispatch(${o.id})">
             <div class="order-item-header">
-              <span class="order-customer">${o.customer_name}${o.is_urgent ? ' 🔴加急' : ''}</span>
+              <span class="order-customer">${o.customer_name}${o.is_urgent?' 🔴加急':''}</span>
               ${statusTag(o.status)}
             </div>
-            <div class="order-product">${o.product_name} · ${o.product_details || ''}</div>
+            <div class="order-product">${o.product_name}${o.product_details?' · '+o.product_details:''}</div>
             <div class="order-footer">
               <span class="order-no">${o.order_no}</span>
-              <span class="order-qty">下单 ${o.quantity} 个</span>
+              <span class="order-qty">下单 ${o.quantity}</span>
             </div>
+            ${stockWarn ? '<div style="margin-top:4px;font-size:12px;color:var(--danger)">⚠️ 内包材不足（需'+innerNeed+',库存'+innerStock+'）</div>' : ''}
+            <div style="margin-top:4px;font-size:12px;color:var(--text-secondary)">配料: ${prepDone?'✅ 已完成':'⏳ 未完成'}</div>
             <div style="margin-top:6px">
               <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openDispatch(${o.id})">去派单</button>
-              <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();viewOrder(${o.id},'supervisor')">查看详情</button>
-            </div>
-          </div>
-        `).join('')}
+              <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();viewOrder(${o.id},'supervisor')">查看</button>
+            </div></div>`;
+        }).join('')}
     </div>
     ${renderTabBar('supervisor-pending')}`;
 }
@@ -612,14 +637,64 @@ function closeModal() {
 
 async function renderSupervisorDispatch() { navigate('supervisor-pending'); }
 
+// ===== 物料领料申请 =====
+async function renderRequisition() {
+  var rm = await API.get('/api/raw-materials');
+  var im = await API.get('/api/inner-pack-materials');
+  var am = await API.get('/api/product-accessories');
+  
+  $('#app').innerHTML = `
+    <div class="page-header"><h1>📋 物料领料申请</h1><span class="role-badge">生产组长</span></div>
+    <div class="page-content">
+      <div class="form-group"><label>领料类型</label><select class="form-input" id="req-type" onchange="onReqTypeChange()">
+        <option value="raw">🧈 原材料</option><option value="inner">📥 内包材</option><option value="aux">🔧 辅料/配件</option>
+      </select></div>
+      <div class="form-group"><label>选择物料</label><select class="form-input" id="req-material">
+        ${rm.map(function(m){ return '<option value="raw_'+m.id+'">'+m.name+' (库存:'+(m.stock_qty||0)+')</option>'; }).join('')}
+      </select></div>
+      <div class="form-group"><label>领料数量</label><input class="form-input" id="req-qty" type="number" min="1"></div>
+      <div class="form-group"><label>用途说明</label><input class="form-input" id="req-note" placeholder="关联订单或用途"></div>
+      <button class="btn btn-primary btn-block" onclick="submitRequisition()">提交领料申请</button>
+    </div>
+    ${renderTabBar('supervisor-requisition')}`;
+  window._reqMaterials = { raw: rm, inner: im, aux: am };
+}
+function onReqTypeChange() {
+  var t = document.getElementById('req-type').value;
+  var m = window._reqMaterials[t] || [];
+  document.getElementById('req-material').innerHTML = m.map(function(x){
+    var prefix = t==='raw'?'raw_':t==='inner'?'inner_':'aux_';
+    return '<option value="'+prefix+x.id+'">'+x.name+' (库存:'+(x.stock_qty||0)+')</option>';
+  }).join('');
+}
+async function submitRequisition() {
+  var v = document.getElementById('req-material').value.split('_');
+  var type = v[0], mid = parseInt(v[1]);
+  var qty = parseInt(document.getElementById('req-qty').value);
+  var note = document.getElementById('req-note').value.trim();
+  if (!mid || !qty || qty < 1) return showToast('请完善领料信息', 'error');
+  var res = await API.post('/api/material-requisitions', { type: type, material_id: mid, quantity: qty, note: note });
+  if (res.success) { showToast('领料申请已提交', 'success'); navigate('supervisor-pending'); }
+  else showToast(res.msg || '提交失败', 'error');
+}
+
 async function renderSupervisorStats() {
   const stats = await API.get('/api/dispatch-stats');
+  const overview = await API.get('/api/stats/overview');
+  const allOrders = await API.get('/api/orders');
+  const producing = allOrders.filter(function(o){ return o.status === 'producing'; });
   const now = new Date();
   const month = '' + now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
   
   $('#app').innerHTML = `
     <div class="page-header"><h1>📊 派单统计</h1><span class="role-badge">${month}</span></div>
     <div class="page-content">
+      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="stat-card"><div class="stat-value">${overview.total||0}</div><div class="stat-label">总订单</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#D48806">${overview.pending||0}</div><div class="stat-label">待派单</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#1890FF">${producing.length}</div><div class="stat-label">生产中</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#52C41A">${overview.completed||0}</div><div class="stat-label">已完成</div></div>
+      </div>
       ${stats.map(s => `
         <div class="card">
           <div class="card-title">${s.team_name}</div>

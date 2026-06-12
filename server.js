@@ -539,7 +539,7 @@ app.post('/api/orders/:id/packaging', requireRole('packaging'), function(req, re
 // ===== 库存管理 API =====
 
 // 原材料
-app.get('/api/raw-materials', requireRole('warehouse','admin','console'), function(req, res) {
+app.get('/api/raw-materials', requireRole('warehouse','admin','console','supervisor'), function(req, res) {
   res.json(rowsToObjects(dbQuery("SELECT * FROM raw_materials ORDER BY id")));
 });
 app.post('/api/raw-materials', requireRole('warehouse','admin'), function(req, res) {
@@ -560,7 +560,7 @@ app.post('/api/raw-materials/issue', requireRole('warehouse','admin'), function(
 });
 
 // 内包材
-app.get('/api/inner-pack-materials', requireRole('warehouse','admin','console'), function(req, res) {
+app.get('/api/inner-pack-materials', requireRole('warehouse','admin','console','supervisor'), function(req, res) {
   res.json(rowsToObjects(dbQuery("SELECT * FROM inner_pack_materials ORDER BY id")));
 });
 app.post('/api/inner-pack-materials', requireRole('warehouse','admin'), function(req, res) {
@@ -952,6 +952,18 @@ app.get('/api/export/orders/:id', requireLogin, function(req, res) {
   } else {
     res.json(order);
   }
+});
+
+// 物料领料申请
+app.post('/api/material-requisitions', requireRole('supervisor','admin'), function(req, res) {
+  var b = req.body, type = b.type, mid = safeNum(b.material_id), qty = safeNum(b.quantity);
+  if (!mid || !qty) return res.json({ success: false, msg: '请完善信息' });
+  var table = type === 'raw' ? 'raw_materials' : type === 'inner' ? 'inner_pack_materials' : 'accessory_inventory';
+  var idField = type === 'aux' ? 'accessory_id' : 'id';
+  var m = rowToObject(dbQuery("SELECT * FROM " + table + " WHERE " + idField + "=" + mid));
+  if (!m) return res.json({ success: false, msg: '物料不存在' });
+  dbRun("INSERT INTO notifications (user_id,role,type,title,content,related_id) VALUES (NULL,'warehouse','material_request','领料申请','"+safe(b.note||'')+" 物料:"+safe(m.name||'')+" 数量:"+qty+","+safe(b.quantity)+")");
+  res.json({ success: true, msg: '领料申请已提交至仓库' });
 });
 
 // SPA 回退
