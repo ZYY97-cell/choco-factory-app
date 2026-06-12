@@ -335,103 +335,82 @@ function filterOrders() {
 
 // ===== 文员端 - 新建订单 =====
 async function renderClerkNewOrder() {
-  const customers = await API.get('/api/customers');
+  var customers = await API.get('/api/customers');
+  var allProducts = await API.get('/api/products');
+  window._allProducts = allProducts;
   
   $('#app').innerHTML = `
-    <div class="page-header">
-      <h1>➕ 新建生产单</h1>
-      <span class="role-badge">文员</span>
-    </div>
-    <div class="page-content">
-      <div class="card">
-        <div class="form-group">
-          <label>客户名称 *</label>
-          <select class="form-input" id="sel-customer" onchange="onCustomerChange()">
-            <option value="">请选择客户</option>
-            ${customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label>客户产品 *</label>
-          <select class="form-input" id="sel-product" onchange="onProductChange()">
-            <option value="">请先选择客户</option>
-          </select>
-        </div>
-        <div id="product-info" class="hidden"></div>
-        <div class="form-group">
-          <label>客户下单总数量 *</label>
-          <input class="form-input" id="inp-quantity" type="number" min="1" placeholder="请输入数量（正整数）">
-        </div>
-        <div class="form-group">
-          <label>交货期限</label>
-          <input class="form-input" id="inp-deadline" type="date">
-        </div>
-        <div class="form-group" style="display:flex;align-items:center;gap:8px">
-          <input type="checkbox" id="chk-urgent"><label for="chk-urgent" style="margin:0">加急订单</label>
-        </div>
-        <div class="form-group">
-          <label>备注</label>
-          <textarea class="form-input" id="inp-notes" placeholder="客户特殊要求等"></textarea>
-        </div>
-        <button class="btn btn-primary btn-block" onclick="submitNewOrder()">提交订单</button>
-        <button class="btn btn-outline btn-block" style="margin-top:8px" onclick="navigate('clerk-orders')">取消</button>
-      </div>
-    </div>`;
-  window._newOrderProducts = [];
+    <div class="page-header"><h1>➕ 新建生产单</h1><span class="role-badge">文员</span></div>
+    <div class="page-content"><div class="card">
+      <div class="form-group"><label>客户名称 *</label><select class="form-input" id="sel-customer"><option value="">请选择客户</option>${customers.map(function(c){ return '<option value="'+c.id+'">'+c.name+'</option>'; }).join('')}</select></div>
+      <div style="font-weight:700;font-size:14px;margin:12px 0 6px">📦 添加产品（可添加多个）</div>
+      <div id="order-products">
+        <div class="order-product-row" style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
+          <select class="form-input" style="flex:1" onchange="updateOrderProductsInfo()">${allProducts.map(function(p){ return '<option value="'+p.id+'">'+p.name+'</option>'; }).join('')}</select>
+          <input class="form-input" type="number" min="1" value="1" placeholder="数量" style="width:80px"><button class="btn btn-danger btn-sm" style="width:30px;padding:4px;font-size:12px" onclick="removeOrderProduct(this)">×</button>
+        </div></div>
+      <button class="btn btn-outline btn-sm" onclick="addOrderProduct()">+ 添加产品</button>
+      <div id="order-products-info" style="margin-top:8px"></div>
+      <div class="form-group" style="margin-top:12px"><label>交货期限</label><input class="form-input" id="inp-deadline" type="date"></div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="chk-urgent"><label for="chk-urgent" style="margin:0">加急订单</label></div>
+      <div class="form-group"><label>备注</label><textarea class="form-input" id="inp-notes" placeholder="客户特殊要求等"></textarea></div>
+      <button class="btn btn-primary btn-block" onclick="submitNewOrder()">提交订单</button>
+      <button class="btn btn-outline btn-block" style="margin-top:8px" onclick="navigate('clerk-orders')">取消</button>
+    </div></div>`;
 }
-
-async function onCustomerChange() {
-  const customerId = $('#sel-customer').value;
-  if (!customerId) {
-    $('#sel-product').innerHTML = '<option value="">请先选择客户</option>';
-    $('#product-info').classList.add('hidden');
-    return;
-  }
-  const products = await API.get(`/api/products?customer_id=${customerId}`);
-  window._newOrderProducts = products;
-  $('#sel-product').innerHTML = '<option value="">请选择产品</option>' + 
-    products.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+function addOrderProduct() {
+  var div = document.createElement('div');
+  div.className = 'order-product-row';
+  div.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
+  var opts = (window._allProducts||[]).map(function(p){ return '<option value="'+p.id+'">'+p.name+'</option>'; }).join('');
+  div.innerHTML = '<select class="form-input" style="flex:1" onchange="updateOrderProductsInfo()">'+opts+'</select><input class="form-input" type="number" min="1" value="1" placeholder="数量" style="width:80px"><button class="btn btn-danger btn-sm" style="width:30px;padding:4px;font-size:12px" onclick="removeOrderProduct(this)">×</button>';
+  document.getElementById('order-products').appendChild(div);
 }
-
-function onProductChange() {
-  const productId = parseInt($('#sel-product').value);
-  const product = (window._newOrderProducts || []).find(p => p.id === productId);
-  const info = $('#product-info');
-  if (!product) { info.classList.add('hidden'); return; }
-  
-  info.classList.remove('hidden');
-  info.innerHTML = `
-    <div class="detail-section" style="margin-bottom:12px">
-      <h3>📦 产品信息（自动带出）</h3>
-      <div class="detail-row"><span class="label">产品明细</span><span class="value">${product.details || '-'}</span></div>
-      <div class="detail-row"><span class="label">产品色卡</span><span class="value"><span class="color-card-display"><span class="color-swatch" style="background:${product.color_code || '#ccc'}"></span>${product.color_code || '-'}</span></span></div>
-      <div class="detail-row"><span class="label">内包物料</span><span class="value">${product.inner_pack_spec || '-'} ×${product.inner_pack_qty||1}/件</span></div>
-      <div class="detail-row"><span class="label">外包物料</span><span class="value">${product.outer_pack_spec || '-'}</span></div>
-      ${(product.children||[]).length ? `
-        <div style="margin-top:8px"><strong style="font-size:12px;color:var(--accent)">📦 子产品组合：</strong></div>
-        ${product.children.map(function(ch){ return '<div style="padding:2px 0;font-size:13px">• '+ch.name+' ×'+ch.quantity+'</div>'; }).join('')}
-      ` : ''}
-      ${product.image_url ? '<img src="'+product.image_url+'" style="max-width:200px;margin-top:8px;border-radius:8px">' : ''}
-      ${(product.images||[]).map(function(im){ return '<img src="'+im.image_url+'" style="max-width:120px;margin:4px;border-radius:6px;display:inline-block">'; }).join('')}
-    </div>`;
+function removeOrderProduct(btn) {
+  var rows = document.querySelectorAll('.order-product-row');
+  if (rows.length <= 1) return;
+  btn.closest('.order-product-row').remove();
+  updateOrderProductsInfo();
+}
+function updateOrderProductsInfo() {
+  var info = document.getElementById('order-products-info');
+  var rows = document.querySelectorAll('.order-product-row');
+  var html = '', all = window._allProducts || [];
+  rows.forEach(function(row){
+    var sel = row.querySelector('select'), qty = row.querySelector('input[type=number]');
+    var pid = parseInt(sel.value);
+    if (!pid) return;
+    var prod = all.find(function(p){ return p.id === pid; });
+    if (!prod) return;
+    html += '<div style="margin-top:6px;padding:6px 10px;background:#fdf8f3;border-radius:8px;font-size:13px"><strong>'+prod.name+'</strong> ×'+qty.value+(prod.inner_pack_spec?' | 内包:'+prod.inner_pack_spec+' ×'+(prod.inner_pack_qty||1)+'/件':'')+(prod.outer_pack_spec?' | 外包:'+prod.outer_pack_spec:'')+((prod.children||[]).length?'<br>子产品: '+prod.children.map(function(c){return c.name+'×'+c.quantity}).join(', '):'')+(prod.image_url?'<br><img src="'+prod.image_url+'" style="max-width:80px;margin-top:4px;border-radius:6px">':'')+'</div>';
+  });
+  if (html) { info.innerHTML = html; info.classList.remove('hidden'); }
+  else info.classList.add('hidden');
 }
 
 async function submitNewOrder() {
-  const customer_id = parseInt($('#sel-customer').value);
-  const product_id = parseInt($('#sel-product').value);
-  const quantity = parseInt($('#inp-quantity').value);
-  const deadline = $('#inp-deadline').value;
-  const is_urgent = $('#chk-urgent').checked;
-  const notes = $('#inp-notes').value.trim();
-  
+  var customer_id = parseInt(document.getElementById('sel-customer').value);
   if (!customer_id) return showToast('请选择客户', 'error');
-  if (!product_id) return showToast('请选择产品', 'error');
-  if (!quantity || quantity < 1) return showToast('请输入有效的下单数量', 'error');
   
-  const res = await API.post('/api/orders', { customer_id, product_id, quantity, deadline, is_urgent, notes });
+  var rows = document.querySelectorAll('.order-product-row');
+  var items = [];
+  rows.forEach(function(row){
+    var sel = row.querySelector('select'), qty = row.querySelector('input[type=number]');
+    var pid = parseInt(sel.value), quantity = parseInt(qty.value)||1;
+    if (pid && quantity > 0) items.push({ product_id: pid, quantity: quantity });
+  });
+  if (!items.length) return showToast('请至少添加一个产品', 'error');
+  
+  var res = await API.post('/api/orders', {
+    customer_id: customer_id,
+    items: items,
+    deadline: document.getElementById('inp-deadline').value,
+    is_urgent: document.getElementById('chk-urgent').checked,
+    notes: document.getElementById('inp-notes').value.trim()
+  });
   if (res.success) {
-    showToast('订单 ' + res.order_no + ' 创建成功！', 'success');
-    if (res.deduction_msg) setTimeout(function(){ alert('库存扣减：\n' + res.deduction_msg); }, 500);
+    showToast('订单 '+res.order_no+' 创建成功！（'+res.items_count+'个产品）', 'success');
+    if (res.deduction_msg) setTimeout(function(){ alert('库存扣减：\n'+res.deduction_msg); }, 500);
     navigate('clerk-orders');
   } else {
     showToast(res.msg || '创建失败', 'error');
@@ -446,53 +425,55 @@ async function viewOrder(id, fromRole) {
 }
 
 async function renderOrderDetail(role) {
-  const id = window._currentOrderId;
-  const order = await API.get(`/api/orders/${id}`);
+  var id = window._currentOrderId;
+  var order = await API.get('/api/orders/' + id);
   if (!order) return showToast('订单不存在', 'error');
   
-  const backPage = {
-    clerk: 'clerk-orders', supervisor: 'supervisor-pending', team: 'team-list',
-    qc: 'qc-list', packaging: 'pack-list', console: 'console-orders', finance: 'finance-overview'
-  };
+  var backPage = { clerk: 'clerk-orders', supervisor: 'supervisor-pending', team: 'team-list', qc: 'qc-list', packaging: 'pack-list', console: 'console-orders', finance: 'finance-overview' };
+  
+  // 多产品明细 HTML
+  var itemsHtml = '';
+  (order.items||[]).forEach(function(it){
+    itemsHtml += '<div style="margin-bottom:10px;padding:10px;background:#fdf8f3;border-radius:10px;border-left:4px solid var(--primary)">' +
+      '<div style="font-weight:700;font-size:14px">'+it.product_name+' ×'+it.quantity+'</div>' +
+      (it.color_code?'<div style="font-size:12px;color:var(--text-secondary)">色卡: '+it.color_code+'</div>':'') +
+      (it.inner_pack_spec?'<div style="font-size:12px;color:var(--text-secondary)">内包: '+it.inner_pack_spec+'</div>':'') +
+      (it.outer_pack_spec?'<div style="font-size:12px;color:var(--text-secondary)">外包: '+it.outer_pack_spec+'</div>':'') +
+      (it.image_url?'<img src="'+it.image_url+'" style="max-width:80px;margin-top:4px;border-radius:6px">':'') +
+      ((it.children||[]).length?'<div style="font-size:11px;color:var(--accent);margin-top:4px">子产品: '+it.children.map(function(c){return c.name+'×'+c.quantity}).join(', ')+'</div>':'') +
+      ((it.images||[]).map(function(im){return '<img src="'+im.image_url+'" style="width:40px;height:40px;object-fit:cover;border-radius:4px;margin:2px;display:inline-block">';}).join('')) +
+      '</div>';
+  });
   
   $('#app').innerHTML = `
-    <div class="page-header">
-      <h1>📄 订单详情</h1>
-    </div>
+    <div class="page-header"><h1>📄 订单详情</h1></div>
     <div class="page-content">
       <div class="detail-section">
         <h3>📋 基本信息</h3>
-        <div class="detail-row"><span class="label">单据编号</span><span class="value" style="font-family:monospace">${order.order_no}</span></div>
-        <div class="detail-row"><span class="label">当前状态</span><span class="value">${statusTag(order.status)}</span></div>
-        <div class="detail-row"><span class="label">客户名称</span><span class="value">${order.customer_name}</span></div>
-        <div class="detail-row"><span class="label">产品名称</span><span class="value">${order.product_name}</span></div>
-        <div class="detail-row"><span class="label">产品明细</span><span class="value">${order.product_details || '-'}</span></div>
-        <div class="detail-row"><span class="label">产品色卡</span><span class="value"><span class="color-card-display"><span class="color-swatch" style="background:${order.color_code||'#ccc'}"></span>${order.color_code||'-'}</span></span></div>
-        <div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:700;color:var(--primary)">${order.quantity}</span></div>
-        <div class="detail-row"><span class="label">内包物料</span><span class="value">${order.inner_pack_spec || '-'}</span></div>
-        <div class="detail-row"><span class="label">外包物料</span><span class="value">${order.outer_pack_spec || '-'}</span></div>
-        ${order.is_urgent ? '<div class="detail-row"><span class="label">加急</span><span class="value" style="color:var(--danger)">🔴 加急订单</span></div>' : ''}
-        ${order.deadline ? `<div class="detail-row"><span class="label">交货期限</span><span class="value">${order.deadline}</span></div>` : ''}
-        ${order.notes ? `<div class="detail-row"><span class="label">备注</span><span class="value">${order.notes}</span></div>` : ''}
-        <div class="detail-row"><span class="label">下单时间</span><span class="value">${formatTime(order.created_at)}</span></div>
+        <div class="detail-row"><span class="label">单号</span><span class="value" style="font-family:monospace">${order.order_no}</span></div>
+        <div class="detail-row"><span class="label">状态</span><span class="value">${statusTag(order.status)}</span></div>
+        <div class="detail-row"><span class="label">客户</span><span class="value">${order.customer_name}${order.customer_contact?' ('+order.customer_contact+')':''}</span></div>
+        ${order.customer_notes?'<div class="detail-row"><span class="label">客户备注</span><span class="value">'+order.customer_notes+'</span></div>':''}
+        ${order.is_urgent?'<div class="detail-row"><span class="label">加急</span><span class="value" style="color:var(--danger)">🔴 加急</span></div>':''}
+        ${order.deadline?'<div class="detail-row"><span class="label">交货</span><span class="value">'+order.deadline+'</span></div>':''}
+        ${order.notes?'<div class="detail-row"><span class="label">备注</span><span class="value">'+order.notes+'</span></div>':''}
+        <div class="detail-row"><span class="label">创建时间</span><span class="value">'+formatTime(order.created_at)+'</span></div>
       </div>
       
-      ${order.dispatch ? `
-        <div class="detail-section">
-          <h3>📌 派单信息</h3>
-          <div class="detail-row"><span class="label">生产班组</span><span class="value">${order.dispatch.team_name}</span></div>
-          <div class="detail-row"><span class="label">派单人</span><span class="value">${order.dispatch.dispatcher_name}</span></div>
-          <div class="detail-row"><span class="label">派单时间</span><span class="value">${formatTime(order.dispatch.dispatched_at)}</span></div>
-        </div>` : ''}
+      <div class="detail-section">
+        <h3>📦 产品清单（'+((order.items||[]).length||1)+'个）</h3>
+        ${itemsHtml || '<div class="detail-row"><span class="label">产品</span><span class="value">'+order.product_name+'</span></div><div class="detail-row"><span class="label">数量</span><span class="value" style="font-weight:700;color:var(--primary)">'+order.quantity+'</span></div>'}
+        ${order.image_url?'<img src="'+order.image_url+'" style="max-width:200px;margin-top:8px;border-radius:8px">':''}
+        ${(order.product_children||[]).length?'<div style="font-size:12px;color:var(--accent);margin-top:4px">子产品: '+order.product_children.map(function(c){return c.name+'×'+c.quantity}).join(', ')+'</div>':''}
+        ${(order.product_images||[]).map(function(im){return '<img src="'+im.image_url+'" style="width:60px;height:60px;object-fit:cover;border-radius:6px;margin:4px;display:inline-block">';}).join('')}
+      </div>
       
-      ${order.production && order.production.length ? `
-        <div class="detail-section">
-          <h3>🏭 生产记录</h3>
-          ${order.production.map(pr => `
-            <div style="margin-bottom:8px;padding:8px;background:#F9F5F0;border-radius:8px">
-              <div class="detail-row"><span class="label">生产班组</span><span class="value">${pr.team_name}</span></div>
-              <div class="detail-row"><span class="label">生产人员</span><span class="value">${pr.workers || '-'}</span></div>
-              <div class="detail-row"><span class="label">实际总产量</span><span class="value" style="font-weight:700">${pr.total_produced}</span></div>
+      ${order.dispatch ? '<div class="detail-section"><h3>📌 派单信息</h3><div class="detail-row"><span class="label">班组</span><span class="value">'+order.dispatch.team_name+'</span></div><div class="detail-row"><span class="label">派单人</span><span class="value">'+order.dispatch.dispatcher_name+'</span></div><div class="detail-row"><span class="label">时间</span><span class="value">'+formatTime(order.dispatch.dispatched_at)+'</span></div></div>' : ''}
+      
+      <button class="btn btn-outline btn-block" style="margin-top:12px" onclick="navigate('${backPage[role]||'clerk-orders'}')">返回</button>
+    </div>` +
+    (backPage[role] ? renderTabBar(backPage[role]) : '');
+}
               <div class="detail-row"><span class="label">提交时间</span><span class="value">${formatTime(pr.submitted_at)}</span></div>
               ${pr.is_rework ? '<div style="color:var(--warning);font-size:12px;font-weight:600">🔄 补产记录</div>' : ''}
             </div>

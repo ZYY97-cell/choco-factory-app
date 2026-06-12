@@ -172,6 +172,19 @@ function createTables() {
     );
   `);
 
+  // 订单产品明细（支持多产品下单）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
+      FOREIGN KEY (order_id) REFERENCES orders(id),
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+  `);
+
   // 派单
   db.run(`
     CREATE TABLE IF NOT EXISTS dispatches (

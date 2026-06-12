@@ -329,6 +329,11 @@ app.get('/api/orders', requireLogin, function(req, res) {
   orders.forEach(function(o) {
     o.accessories = rowsToObjects(dbQuery("SELECT pa.name,pa.id as accessory_id,IFNULL(ai.stock_qty,0) as stock_qty FROM product_accessories pa LEFT JOIN accessory_inventory ai ON pa.id=ai.accessory_id WHERE pa.product_id=" + o.product_id));
     o.product_children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + o.product_id + " ORDER BY sort_order"));
+    o.items = rowsToObjects(dbQuery("SELECT oi.*,p.name as product_name,p.details,p.color_code,p.image_url,p.inner_pack_spec,p.outer_pack_spec FROM order_items oi LEFT JOIN products p ON oi.product_id=p.id WHERE oi.order_id=" + o.id + " ORDER BY oi.sort_order"));
+    o.items.forEach(function(it) {
+      it.children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + it.product_id + " ORDER BY sort_order"));
+        it.images = rowsToObjects(dbQuery("SELECT * FROM product_images WHERE product_id=" + it.product_id + " ORDER BY sort_order"));
+    });
   });
   res.json(orders);
 });
@@ -336,10 +341,16 @@ app.get('/api/orders', requireLogin, function(req, res) {
 // 订单详情
 app.get('/api/orders/:id', requireLogin, function(req, res) {
   var oid = safeNum(req.params.id);
-  var order = rowToObject(dbQuery("SELECT o.*,c.name as customer_name,p.name as product_name,p.items_per_box,p.inner_pack_spec,p.inner_pack_qty,p.outer_pack_spec,p.image_url FROM orders o LEFT JOIN customers c ON o.customer_id=c.id LEFT JOIN products p ON o.product_id=p.id WHERE o.id=" + oid));
+  var order = rowToObject(dbQuery("SELECT o.*,c.name as customer_name,c.contact as customer_contact,c.notes as customer_notes,p.name as product_name,p.items_per_box,p.inner_pack_spec,p.inner_pack_qty,p.outer_pack_spec,p.image_url FROM orders o LEFT JOIN customers c ON o.customer_id=c.id LEFT JOIN products p ON o.product_id=p.id WHERE o.id=" + oid));
   if (!order) return res.status(404).json({ error: '订单不存在' });
   order.product_children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + order.product_id + " ORDER BY sort_order"));
   order.product_images = rowsToObjects(dbQuery("SELECT * FROM product_images WHERE product_id=" + order.product_id + " ORDER BY sort_order"));
+  // 多产品信息
+  order.items = rowsToObjects(dbQuery("SELECT oi.*,p.name as product_name,p.details,p.color_code,p.image_url,p.inner_pack_spec,p.outer_pack_spec FROM order_items oi LEFT JOIN products p ON oi.product_id=p.id WHERE oi.order_id=" + oid + " ORDER BY oi.sort_order"));
+  order.items.forEach(function(it) {
+    it.children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + it.product_id + " ORDER BY sort_order"));
+    it.images = rowsToObjects(dbQuery("SELECT * FROM product_images WHERE product_id=" + it.product_id + " ORDER BY sort_order"));
+  });
   res.json(order);
 });
 
@@ -349,42 +360,58 @@ app.post('/api/orders', requireRole('clerk','admin'), function(req, res) {
   var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM orders"))[0].c + 1;
   var orderNo = prefix + String(cnt).padStart(6,'0');
   var iu = b.is_urgent ? 1 : 0;
-  dbRun("INSERT INTO orders (order_no,customer_id,product_id,quantity,status,is_urgent,deadline,notes,created_by) VALUES ('" + orderNo + "'," + safeNum(b.customer_id) + "," + safeNum(b.product_id) + "," + safeNum(b.quantity) + ",'pending'," + iu + ",'" + safe(b.deadline||'') + "','" + safe(b.notes||'') + "'," + req.session.user.id + ")");
+  
+  // 支持多产品下单
+  var items = b.items || [{ product_id: b.product_id, quantity: b.quantity }];
+  if (!items.length) return res.json({ success: false, msg: '请至少选择一个产品' });
+  
+  var firstItem = items[0];
+  var firstProduct = rowToObject(dbQuery("SELECT id,name,inner_pack_spec,inner_pack_qty FROM products WHERE id=" + safeNum(firstItem.product_id)));
+  var totalQty = items.reduce(function(s,it){ return s + safeNum(it.quantity); }, 0);
+  
+  dbRun("INSERT INTO orders (order_no,customer_id,product_id,quantity,status,is_urgent,deadline,notes,created_by) VALUES ('" + orderNo + "'," + safeNum(b.customer_id) + "," + safeNum(firstItem.product_id) + "," + totalQty + ",'pending'," + iu + ",'" + safe(b.deadline||'') + "','" + safe(b.notes||'') + "'," + req.session.user.id + ")");
   var orderId = getLastId();
 
-  // 配件库存抵扣
-  var accs = rowsToObjects(dbQuery("SELECT pa.id as accessory_id,pa.name,IFNULL(ai.stock_qty,0) as stock_qty FROM product_accessories pa LEFT JOIN accessory_inventory ai ON pa.id=ai.accessory_id WHERE pa.product_id=" + safeNum(b.product_id)));
+  // 插入多产品明细
+  items.forEach(function(it, idx) {
+    dbRun("INSERT INTO order_items (order_id,product_id,quantity,sort_order) VALUES (" + orderId + "," + safeNum(it.product_id) + "," + safeNum(it.quantity,1) + "," + idx + ")");
+  });
+
   var deductMsg = '';
+  // 内包材自动对冲（所有产品汇总）
+  items.forEach(function(it) {
+    var prod = rowToObject(dbQuery("SELECT inner_pack_qty,inner_pack_spec FROM products WHERE id=" + safeNum(it.product_id)));
+    if (prod && prod.inner_pack_qty > 0) {
+      var needTotal = safeNum(it.quantity) * prod.inner_pack_qty;
+      var ims = rowsToObjects(dbQuery("SELECT * FROM inner_pack_materials WHERE stock_qty > 0 ORDER BY id"));
+      var remaining = needTotal;
+      ims.forEach(function(im) {
+        if (remaining <= 0) return;
+        var deduct = Math.min(im.stock_qty, remaining);
+        var newStock = im.stock_qty - deduct;
+        dbRun("UPDATE inner_pack_materials SET stock_qty=" + newStock + " WHERE id=" + im.id);
+        dbRun("INSERT INTO inner_pack_issues (material_id,quantity,issued_by) VALUES (" + im.id + "," + deduct + "," + req.session.user.id + ")");
+        deductMsg += '内包材'+im.name+': 抵扣'+deduct+',剩余'+newStock+'; ';
+        remaining -= deduct;
+      });
+      if (remaining > 0) deductMsg += '⚠️内包材不足，缺'+remaining+'个; ';
+    }
+  });
+
+  // 配件库存抵扣
+  var accs = rowsToObjects(dbQuery("SELECT pa.id as accessory_id,pa.name,IFNULL(ai.stock_qty,0) as stock_qty FROM product_accessories pa LEFT JOIN accessory_inventory ai ON pa.id=ai.accessory_id WHERE pa.product_id=" + safeNum(firstItem.product_id)));
   accs.forEach(function(acc) {
     if (acc.stock_qty > 0) {
-      var deduct = Math.min(acc.stock_qty, safeNum(b.quantity));
+      var deduct = Math.min(acc.stock_qty, totalQty);
       var remain = acc.stock_qty - deduct;
       dbRun("UPDATE accessory_inventory SET stock_qty=" + remain + ",updated_at=CURRENT_TIMESTAMP WHERE accessory_id=" + acc.accessory_id);
       deductMsg += acc.name + ': 抵扣' + deduct + '个, 剩余' + remain + '个; ';
     }
   });
 
-  // 内包材库存自动对冲扣减
-  var innerPack = rowToObject(dbQuery("SELECT inner_pack_qty,inner_pack_spec FROM products WHERE id=" + safeNum(b.product_id)));
-  if (innerPack && innerPack.inner_pack_qty > 0) {
-    var needTotal = safeNum(b.quantity) * innerPack.inner_pack_qty;
-    var ims = rowsToObjects(dbQuery("SELECT * FROM inner_pack_materials WHERE stock_qty > 0 ORDER BY id"));
-    var remaining = needTotal;
-    ims.forEach(function(im) {
-      if (remaining <= 0) return;
-      var deduct = Math.min(im.stock_qty, remaining);
-      var newStock = im.stock_qty - deduct;
-      dbRun("UPDATE inner_pack_materials SET stock_qty=" + newStock + " WHERE id=" + im.id);
-      dbRun("INSERT INTO inner_pack_issues (material_id,quantity,issued_by) VALUES (" + im.id + "," + deduct + "," + req.session.user.id + ")");
-      deductMsg += '内包材' + im.name + ': 抵扣' + deduct + ', 剩余' + newStock + '; ';
-      remaining -= deduct;
-    });
-    if (remaining > 0) deductMsg += '⚠️内包材不足，缺少' + remaining + '个; ';
-  }
-
-  addNotif('supervisor', null, 'new_order', '新订单待派单', '订单' + orderNo + '已创建. ' + deductMsg, orderId);
+  addNotif('supervisor', null, 'new_order', '新订单待派单', '订单' + orderNo + '已创建, ' + items.length + '个产品. ' + deductMsg, orderId);
   addLog(req.session.user.id, 'create_order', '创建订单' + orderNo + ', ' + deductMsg, orderId);
-  res.json({ success: true, id: orderId, order_no: orderNo, deduction_msg: deductMsg });
+  res.json({ success: true, id: orderId, order_no: orderNo, items_count: items.length, deduction_msg: deductMsg });
 });
 
 app.put('/api/orders/:id/status', requireRole('admin','clerk'), function(req, res) {
