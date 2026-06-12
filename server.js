@@ -184,6 +184,31 @@ app.delete('/api/customers/:id', requireRole('admin'), function(req, res) {
   res.json({ success: true });
 });
 
+// 客户批量导入（Excel）
+app.post('/api/customers/import', requireRole('admin'), upload.single('file'), function(req, res) {
+  if (!req.file) return res.json({ success: false, msg: '请上传文件' });
+  try {
+    var XLSX = require('xlsx');
+    var wb = XLSX.readFile(req.file.path);
+    var sheet = wb.Sheets[wb.SheetNames[0]];
+    var rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    var count = 0, skipped = 0;
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i], name = (r[0]||'').toString().trim();
+      if (!name) { skipped++; continue; }
+      var contact = (r[1]||'').toString().trim();
+      var notes = (r[2]||'').toString().trim();
+      dbRun("INSERT INTO customers (name,contact,notes) VALUES ('"+safe(name)+"','"+safe(contact)+"','"+safe(notes)+"')");
+      count++;
+    }
+    try { require('fs').unlinkSync(req.file.path); } catch(e) {}
+    res.json({ success: true, count: count, skipped: skipped, msg: '成功导入 '+count+' 个客户'+(skipped>0?'，跳过 '+skipped+' 行':'') });
+  } catch(e) {
+    try { require('fs').unlinkSync(req.file.path); } catch(ex) {}
+    res.json({ success: false, msg: '解析失败：' + e.message });
+  }
+});
+
 // 产品（含图片和配件）
 app.get('/api/products', requireLogin, function(req, res) {
   var sql = "SELECT p.*,c.name as customer_name FROM products p LEFT JOIN customers c ON p.customer_id=c.id";
@@ -536,6 +561,25 @@ app.get('/api/stats/overview', requireLogin, function(req, res) {
   // 质检中
   var r5 = dbQuery("SELECT COUNT(*) as c FROM orders WHERE status='inspecting'");
   if (r5[0]) result.inspecting = r5[0].values[0][0];
+  res.json(result);
+});
+
+// 不良品统计
+app.get('/api/stats/defect', requireLogin, function(req, res) {
+  var r = { hair: 0, color_mix: 0, edge: 0, whitening: 0, bubble: 0, broken: 0, color_fail: 0 };
+  var items = rowsToObjects(dbQuery("SELECT reason,SUM(inspect_qty) as qty FROM inspection_items GROUP BY reason"));
+  items.forEach(function(it) { r[it.reason] = (r[it.reason]||0) + (it.qty||0); });
+  res.json(r);
+});
+
+// 班组产量统计
+app.get('/api/stats/production', requireLogin, function(req, res) {
+  var teams = rowsToObjects(dbQuery("SELECT id,name FROM teams ORDER BY id"));
+  var result = [];
+  teams.forEach(function(t) {
+    var r = rowToObject(dbQuery("SELECT COUNT(DISTINCT d.order_id) as order_count,SUM(p.produced_qty) as total_produced FROM dispatches d LEFT JOIN productions p ON d.order_id=p.order_id WHERE d.team_id=" + t.id));
+    result.push({ team_name: t.name, order_count: (r&&r.order_count)||0, total_produced: (r&&r.total_produced)||0 });
+  });
   res.json(result);
 });
 

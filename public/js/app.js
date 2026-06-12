@@ -555,11 +555,13 @@ async function renderSupervisorPending() {
 }
 
 async function openDispatch(orderId) {
+  try {
   window._dispatchOrderId = orderId;
-  const order = await API.get(`/api/orders/${orderId}`);
-  const teams = await API.get('/api/teams');
-  const dispatchStats = await API.get('/api/dispatch-stats');
-  const threshold = 3;
+  var order = await API.get('/api/orders/' + orderId);
+  var teams = await API.get('/api/teams');
+  var ds = await API.get('/api/dispatch-stats');
+  var dispatchStats = ds.stats || ds;
+  var threshold = ds.threshold || 3;
   
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
@@ -596,6 +598,10 @@ async function openDispatch(orderId) {
   
   document.body.appendChild(modal);
   window._selectedTeamId = null;
+  } catch(e) {
+    console.error('openDispatch error:', e);
+    showToast('派单数据加载失败，请刷新重试', 'error');
+  }
 }
 
 function selectTeam(el, teamId) {
@@ -1335,6 +1341,7 @@ async function markAllRead() {
 
 // ===== 统计看板 =====
 async function renderStats() {
+  try {
   const stats = await API.get('/api/stats/overview');
   const defectStats = await API.get('/api/stats/defect');
   const prodStats = await API.get('/api/stats/production');
@@ -1366,6 +1373,10 @@ async function renderStats() {
       </div>
     </div>
     ${renderTabBar('stats')}`;
+  } catch(e) {
+    console.error('renderStats error:', e);
+    $('#app').innerHTML = '<div class="page-header"><h1>📊 数据统计</h1></div><div class="page-content"><div class="empty-state"><div class="empty-icon">⚠️</div>统计加载失败，请刷新重试</div></div>';
+  }
 }
 
 // ===== 管理后台 =====
@@ -1390,6 +1401,10 @@ async function renderAdmin() {
         <div style="margin-top:8px;display:flex;gap:6px">
           <input class="form-input" id="inp-new-customer" placeholder="客户名称" style="flex:1">
           <button class="btn btn-primary btn-sm" onclick="addCustomer()">添加</button>
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">
+          📥 批量导入：<input type="file" id="cust-import-file" accept=".xlsx,.xls" style="display:inline;width:auto;font-size:12px" onchange="importCustomers()">
+          <span style="margin-left:4px">Excel第一列=名称，第二列=联系人，第三列=备注</span>
         </div>
       </div>
       <div class="admin-section">
@@ -1447,6 +1462,18 @@ async function addCustomer() {
 async function deleteCustomer(id) {
   if (!confirm('确定删除该客户？')) return;
   await API.delete(`/api/customers/${id}`); showToast('已删除', 'success'); navigate('admin');
+}
+async function importCustomers() {
+  var f = document.getElementById('cust-import-file').files[0];
+  if (!f) return;
+  if (!f.name.match(/\.xlsx?$/i)) return showToast('请选择 .xlsx 或 .xls 文件', 'error');
+  var fd = new FormData();
+  fd.append('file', f);
+  showToast('正在导入...', 'warning');
+  var resp = await fetch('/api/customers/import', { method: 'POST', body: fd });
+  var res = await resp.json();
+  if (res.success) { showToast(res.msg || '导入成功', 'success'); navigate('admin'); }
+  else showToast(res.msg || '导入失败', 'error');
 }
 async function addTeam() {
   const name = $('#inp-new-team').value.trim();
