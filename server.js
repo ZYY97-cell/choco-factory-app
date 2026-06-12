@@ -999,8 +999,8 @@ app.post('/api/material-requisitions', requireRole('supervisor','admin','qc','pa
   var m = rowToObject(dbQuery("SELECT * FROM " + table + " WHERE " + idField + "=" + mid));
   if (!m) return res.json({ success: false, msg: '物料不存在' });
   var typeLabel = type === 'outer' ? '外包材' : type === 'inner' ? '内包材' : type === 'raw' ? '原材料' : '辅料配件';
-  var relatedId = b.order_id ? safeNum(b.order_id) : 'NULL';
-  dbRun("INSERT INTO notifications (user_id,role,type,title,content,related_id) VALUES (NULL,'warehouse','material_request','"+typeLabel+"领料申请','订单:"+safe(b.order_no||'-')+" "+safe(b.note||'')+" 物料:"+safe(m.name||'')+" 规格:"+safe(m.spec||'')+" 数量:"+qty+"',"+relatedId+")");
+  var ordId = b.order_id ? safeNum(b.order_id) : 'NULL';
+  dbRun("INSERT INTO notifications (user_id,role,type,title,content,order_id) VALUES (NULL,'warehouse','material_request','"+typeLabel+"领料申请','订单:"+safe(b.order_no||'-')+" "+safe(b.note||'')+" 物料:"+safe(m.name||'')+" 规格:"+safe(m.spec||'')+" 数量:"+qty+"',"+ordId+")");
   res.json({ success: true, msg: '领料申请已提交至仓库' });
 });
 
@@ -1172,8 +1172,7 @@ app.post('/api/purchase-requests', requireRole('clerk','supervisor','team','qc',
   dbRun("INSERT INTO purchase_requests (request_no,applicant_id,applicant_name,applicant_role,department,product_name,product_color,product_size,product_material,quantity,image_url,priority,status,notes) VALUES ('" + rno + "'," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(req.session.user.role) + "','" + safe(dept) + "','" + safe(b.product_name) + "','" + safe(b.product_color||'') + "','" + safe(b.product_size||'') + "','" + safe(b.product_material||'') + "'," + safeNum(b.quantity) + ",'" + safe(imageUrl) + "','" + safe(priority) + "','pending','" + safe(b.notes||'') + "')");
 
   // 紧急采购自动审批
-  var rid = rowsToObjects(dbQuery("SELECT last_insert_rowid() as id"));
-  var reqId = rid.length ? rid[0].id : 0;
+  var reqId = safeNum((rowToObject(dbQuery("SELECT MAX(id) as id FROM purchase_requests")) || {}).id, 0);
   if (priority === 'urgent') {
     dbRun("UPDATE purchase_requests SET status='approved',updated_at=CURRENT_TIMESTAMP WHERE id=" + reqId);
     dbRun("INSERT INTO purchase_request_logs (request_id,operator_id,operator_name,operator_role,action,action_detail,old_status,new_status) VALUES (" + reqId + "," + req.session.user.id + ",'系统','system','auto_approve','紧急采购自动审批通过','pending','approved')");
@@ -1270,8 +1269,7 @@ app.post('/api/purchase-requests/:id/convert', requireRole('procurement','admin'
 
   dbRun("INSERT INTO procurement_orders (order_no,material_type,material_id,material_name,material_spec,current_stock,min_alert,apply_qty,suggested_qty,estimated_price,actual_price,priority,status,supplier_id,applicant_id,request_id,contract_url,quote_url,order_date,unit_price,trigger_reason,notes) VALUES ('" + pno + "','raw',0,'" + safe(r.product_name) + "','" + safe(r.product_color||'') + " " + safe(r.product_size||'') + " " + safe(r.product_material||'') + "',0,0," + r.quantity + "," + safeNum(b.suggested_qty||r.quantity) + "," + safeNum(b.estimated_price) + ",NULL,'" + safe(r.priority) + "','pending','" + (b.supplier_id ? safeNum(b.supplier_id) : 'NULL') + "'," + r.applicant_id + "," + r.id + ",'" + safe(b.contract_url||'') + "','" + safe(b.quote_url||'') + "','" + safe(b.order_date||'') + "'," + safeNum(b.unit_price) + ",'采购申请" + safe(r.request_no) + "','" + safe(b.notes||'') + "')");
 
-  var pid = rowsToObjects(dbQuery("SELECT last_insert_rowid() as id"));
-  var poId = pid.length ? pid[0].id : 0;
+  var poId = safeNum((rowToObject(dbQuery("SELECT MAX(id) as id FROM procurement_orders")) || {}).id, 0);
 
   dbRun("UPDATE purchase_requests SET status='converted',proc_order_id=" + poId + ",updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
   dbRun("INSERT INTO purchase_request_logs (request_id,operator_id,operator_name,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(req.session.user.role) + "','convert','转为采购单" + pno + "','approved','converted')");
