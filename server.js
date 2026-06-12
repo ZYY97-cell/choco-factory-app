@@ -581,7 +581,7 @@ app.post('/api/inner-pack-materials/issue', requireRole('warehouse','admin'), fu
 });
 
 // 外包材
-app.get('/api/outer-pack-materials', requireRole('warehouse','admin','console'), function(req, res) {
+app.get('/api/outer-pack-materials', requireRole('warehouse','admin','console','packaging'), function(req, res) {
   res.json(rowsToObjects(dbQuery("SELECT * FROM outer_pack_materials ORDER BY id")));
 });
 app.post('/api/outer-pack-materials', requireRole('warehouse','admin'), function(req, res) {
@@ -954,15 +954,17 @@ app.get('/api/export/orders/:id', requireLogin, function(req, res) {
   }
 });
 
-// 物料领料申请
-app.post('/api/material-requisitions', requireRole('supervisor','admin','qc'), function(req, res) {
+// 物料领料申请（含外包材领料）
+app.post('/api/material-requisitions', requireRole('supervisor','admin','qc','packaging'), function(req, res) {
   var b = req.body, type = b.type, mid = safeNum(b.material_id), qty = safeNum(b.quantity);
   if (!mid || !qty) return res.json({ success: false, msg: '请完善信息' });
-  var table = type === 'raw' ? 'raw_materials' : type === 'inner' ? 'inner_pack_materials' : 'accessory_inventory';
+  var table = type === 'raw' ? 'raw_materials' : type === 'inner' ? 'inner_pack_materials' : type === 'aux' ? 'accessory_inventory' : 'outer_pack_materials';
   var idField = type === 'aux' ? 'accessory_id' : 'id';
   var m = rowToObject(dbQuery("SELECT * FROM " + table + " WHERE " + idField + "=" + mid));
   if (!m) return res.json({ success: false, msg: '物料不存在' });
-  dbRun("INSERT INTO notifications (user_id,role,type,title,content,related_id) VALUES (NULL,'warehouse','material_request','领料申请','"+safe(b.note||'')+" 物料:"+safe(m.name||'')+" 数量:"+qty+","+safe(b.quantity)+")");
+  var typeLabel = type === 'outer' ? '外包材' : type === 'inner' ? '内包材' : type === 'raw' ? '原材料' : '辅料配件';
+  var relatedId = b.order_id ? safeNum(b.order_id) : 'NULL';
+  dbRun("INSERT INTO notifications (user_id,role,type,title,content,related_id) VALUES (NULL,'warehouse','material_request','"+typeLabel+"领料申请','订单:"+safe(b.order_no||'-')+" "+safe(b.note||'')+" 物料:"+safe(m.name||'')+" 规格:"+safe(m.spec||'')+" 数量:"+qty+"',"+relatedId+")");
   res.json({ success: true, msg: '领料申请已提交至仓库' });
 });
 

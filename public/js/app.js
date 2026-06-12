@@ -58,6 +58,11 @@ function formatTime(t) {
   return t.replace('T', ' ').slice(0, 16);
 }
 
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 // ===== 页面路由 =====
 function navigate(page) {
   currentPage = page;
@@ -82,6 +87,7 @@ function navigate(page) {
     case 'qc-requisition': renderRequisition(); break;
     case 'pack-list': renderPackOrders(); break;
     case 'pack-complete': renderPackComplete(); break;
+    case 'pack-requisition': renderPackRequisition(); break;
     case 'console-overview': renderConsoleOverview(); break;
     case 'console-orders': renderConsoleOrders(); break;
     case 'finance-overview': renderFinanceOverview(); break;
@@ -177,6 +183,7 @@ async function renderDashboard() {
     ],
     packaging: [
       { id: 'pack-list', icon: '📦', label: '待打包' },
+      { id: 'pack-requisition', icon: '📋', label: '领料' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
@@ -478,38 +485,6 @@ async function renderOrderDetail(role) {
     </div>` +
     (backPage[role] ? renderTabBar(backPage[role]) : '');
 }
-              <div class="detail-row"><span class="label">提交时间</span><span class="value">${formatTime(pr.submitted_at)}</span></div>
-              ${pr.is_rework ? '<div style="color:var(--warning);font-size:12px;font-weight:600">🔄 补产记录</div>' : ''}
-            </div>
-          `).join('')}
-        </div>` : ''}
-      
-      ${order.inspections && order.inspections.length ? `
-        <div class="detail-section">
-          <h3>🔍 质检记录</h3>
-          ${order.inspections.map(ins => `
-            <div style="margin-bottom:8px;padding:8px;background:#F9F5F0;border-radius:8px">
-              <div class="detail-row"><span class="label">质检结果</span><span class="value">${ins.result === 'pass' ? '<span style="color:var(--success)">✅ 通过</span>' : '<span style="color:var(--danger)">❌ 不通过</span>'}</span></div>
-              <div class="detail-row"><span class="label">合格数量</span><span class="value" style="color:var(--success);font-weight:700">${ins.qualified_qty}</span></div>
-              <div class="detail-row"><span class="label">不合格</span><span class="value" style="color:var(--danger)">${ins.unqualified_qty}</span></div>
-              <div class="detail-row"><span class="label">检验人</span><span class="value">${ins.inspector_name || '-'}</span></div>
-              <div class="detail-row"><span class="label">检验时间</span><span class="value">${formatTime(ins.inspected_at)}</span></div>
-            </div>
-          `).join('')}
-        </div>` : ''}
-      
-      ${order.packaging ? `
-        <div class="detail-section">
-          <h3>📦 打包信息</h3>
-          <div class="detail-row"><span class="label">打包方式</span><span class="value">${order.packaging.pack_method || '-'}</span></div>
-          <div class="detail-row"><span class="label">打包人员</span><span class="value">${order.packaging.pack_worker || '-'}</span></div>
-          <div class="detail-row"><span class="label">完成时间</span><span class="value">${formatTime(order.packaging.completed_at)}</span></div>
-        </div>` : ''}
-      
-      <button class="btn btn-outline btn-block" onclick="navigate('${backPage[window._fromRole] || 'dashboard'}')">返回</button>
-    </div>`;
-}
-
 // ===== 生产组长端 =====
 async function renderSupervisorPending() {
   var orders = await API.get('/api/orders?status=pending');
@@ -1066,20 +1041,30 @@ async function submitInspection() {
 
 // ===== 外包打包端 =====
 async function renderPackOrders() {
-  const orders = await API.get('/api/orders?status=qc_passed');
+  var orders = await API.get('/api/orders?status=qc_passed');
   
   $('#app').innerHTML = `
     <div class="page-header"><h1>📦 待打包订单</h1><span class="role-badge">外包打包</span></div>
     <div class="page-content">
       ${!orders.length ? '<div class="empty-state"><div class="empty-icon">📭</div>暂无待打包订单</div>' :
-        orders.map(o => `
-          <div class="order-item" onclick="startPack(${o.id})">
-            <div class="order-item-header"><span class="order-customer">${o.customer_name}</span>${statusTag(o.status)}</div>
-            <div class="order-product">${o.product_name}</div>
-            <div class="order-footer"><span class="order-no">${o.order_no}</span><span class="order-qty">下单 ${o.quantity}</span></div>
-            <div style="margin-top:6px"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startPack(${o.id})">开始打包</button></div>
-          </div>
-        `).join('')}
+        orders.map(function(o) {
+          var ccHtml = o.color_code ? '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:'+esc(o.color_code)+';border:1px solid #999;vertical-align:middle;margin-right:5px"></span>' : '';
+          var boxHtml = o.outer_pack_spec ? '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">📐 '+esc(o.outer_pack_spec)+'</div>' : '';
+          var itemsHtml = '';
+          if (o.items && o.items.length > 1) {
+            itemsHtml = '<div style="font-size:11px;color:var(--accent);margin-top:2px">多产品: '+o.items.map(function(it){return it.product_name+'×'+it.quantity;}).join(' / ')+'</div>';
+          } else if (o.product_children && o.product_children.length) {
+            itemsHtml = '<div style="font-size:11px;color:var(--accent);margin-top:2px">含子产品: '+o.product_children.map(function(c){return c.name+'×'+c.quantity;}).join(' / ')+'</div>';
+          }
+          return '<div class="order-item" onclick="startPack('+o.id+')">'
+            + '<div class="order-item-header"><span class="order-customer">'+esc(o.customer_name)+'</span>'+statusTag(o.status)+'</div>'
+            + '<div class="order-product">'+ccHtml+esc(o.product_name)+'</div>'
+            + (o.inner_pack_spec ? '<div style="font-size:11px;color:var(--text-secondary)">🛍️ '+esc(o.inner_pack_spec)+'</div>' : '')
+            + boxHtml + itemsHtml
+            + '<div class="order-footer"><span class="order-no">'+esc(o.order_no)+'</span><span class="order-qty">下单 '+o.quantity+'</span></div>'
+            + '<div style="margin-top:6px"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();startPack('+o.id+')">开始打包</button></div>'
+            + '</div>';
+        }).join('')}
     </div>
     ${renderTabBar('pack-list')}`;
 }
@@ -1090,26 +1075,105 @@ async function startPack(orderId) {
 }
 
 async function renderPackComplete() {
-  const orderId = window._packOrderId;
+  var orderId = window._packOrderId;
   if (!orderId) return navigate('pack-list');
-  const order = await API.get(`/api/orders/${orderId}`);
-  
+  var order = await API.get('/api/orders/' + orderId);
+  var outMats = [];
+  try { outMats = await API.get('/api/outer-pack-materials'); } catch(e) {}
+
+  // 产品色号色块
+  var ccHtml = order.color_code ? '<span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:'+esc(order.color_code)+';border:1px solid #999;vertical-align:middle;margin-right:6px"></span><span style="font-size:13px;color:var(--text-secondary)">'+esc(order.color_code)+'</span>' : '<span style="color:var(--text-secondary)">未设置</span>';
+
+  // 多产品订单项
+  var itemsHtml = '';
+  if (order.items && order.items.length > 0) {
+    itemsHtml = '<div class="detail-section"><h3>🧩 订单产品明细</h3>';
+    order.items.forEach(function(it) {
+      var itCC = it.color_code ? '<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:'+esc(it.color_code)+';border:1px solid #999;vertical-align:middle;margin-right:4px"></span>' : '';
+      itemsHtml += '<div style="background:var(--bg-secondary);border-radius:8px;padding:10px;margin-bottom:8px">'
+        + '<div style="font-weight:700">'+itCC+esc(it.product_name)+' <span style="color:var(--accent);font-weight:800">×'+it.quantity+'</span></div>';
+      if (it.inner_pack_spec) itemsHtml += '<div style="font-size:12px;color:var(--text-secondary)">🛍️ 内包材: '+esc(it.inner_pack_spec)+'</div>';
+      if (it.outer_pack_spec) itemsHtml += '<div style="font-size:12px;color:var(--text-secondary)">📐 盒/箱规: '+esc(it.outer_pack_spec)+'</div>';
+      if (it.children && it.children.length) {
+        itemsHtml += '<div style="font-size:11px;color:var(--accent);margin-top:4px">└ 子产品: '+it.children.map(function(c){return c.name+'×'+c.quantity;}).join(' / ')+'</div>';
+      }
+      itemsHtml += '</div>';
+    });
+    itemsHtml += '</div>';
+  }
+
+  // 子产品明细
+  var childrenHtml = '';
+  if (order.product_children && order.product_children.length) {
+    childrenHtml = '<div class="detail-section"><h3>🧸 子产品组合</h3>'
+      + order.product_children.map(function(c) {
+        var cImg = c.image_url ? '<img src="'+esc(c.image_url)+'" style="width:40px;height:40px;object-fit:cover;border-radius:6px;margin-right:8px" onerror="this.style.display=\'none\'">' : '';
+        return '<div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-color)">'+cImg+'<span style="flex:1;font-weight:600">'+esc(c.name)+'</span><span style="color:var(--accent);font-weight:800">×'+c.quantity+'</span></div>';
+      }).join('')
+      + '</div>';
+  }
+
+  // 盒规与箱规（从外包材库存匹配）
+  var boxSpecHtml = '';
+  var cartonSpecHtml = '';
+  if (outMats.length) {
+    var boxes = outMats.filter(function(m){return m.box_type === '飞机盒' || m.box_type === '礼盒';});
+    var cartons = outMats.filter(function(m){return m.box_type === '外箱';});
+    if (boxes.length) {
+      boxSpecHtml = '<div class="detail-section"><h3>📏 盒规（内盒规格）</h3>'
+        + boxes.map(function(m){
+          var dQty = m.items_per_box ? Math.ceil(order.quantity / m.items_per_box) : 0;
+          var lowClass = m.stock_qty < (m.min_alert||0) ? 'color:var(--error)' : '';
+          return '<div class="detail-row"><span class="label">'+esc(m.name)+'</span><span class="value">'+esc(m.spec||'-')+' | 每盒装'+m.items_per_box+'个 | 需约'+dQty+'个 <span style="'+lowClass+'">库存:'+m.stock_qty+'</span></span></div>';
+        }).join('')
+        + '</div>';
+    }
+    if (cartons.length) {
+      cartonSpecHtml = '<div class="detail-section"><h3>📐 箱规（外箱规格）</h3>'
+        + cartons.map(function(m){
+          var lowClass = m.stock_qty < (m.min_alert||0) ? 'color:var(--error)' : '';
+          return '<div class="detail-row"><span class="label">'+esc(m.name)+'</span><span class="value">'+esc(m.spec||'-')+' <span style="'+lowClass+'">库存:'+m.stock_qty+'</span></span></div>';
+        }).join('')
+        + '</div>';
+    }
+  }
+
+  // 产品配置的盒/箱规文字
+  if (order.outer_pack_spec && !boxSpecHtml) {
+    boxSpecHtml = '<div class="detail-section"><h3>📏 盒/箱规</h3><div class="detail-row"><span class="label">外包规格</span><span class="value">'+esc(order.outer_pack_spec)+'</span></div></div>';
+  }
+
   $('#app').innerHTML = `
-    <div class="page-header"><h1>📦 打包登记</h1></div>
+    <div class="page-header"><h1>📦 打包登记</h1><span class="role-badge">外包打包</span></div>
     <div class="page-content">
+      <!-- 订单概要 -->
       <div class="detail-section">
         <h3>📋 订单信息</h3>
-        <div class="detail-row"><span class="label">单号</span><span class="value">${order.order_no}</span></div>
-        <div class="detail-row"><span class="label">客户</span><span class="value">${order.customer_name}</span></div>
-        <div class="detail-row"><span class="label">产品</span><span class="value">${order.product_name}</span></div>
-        <div class="detail-row"><span class="label">内包物料</span><span class="value">${order.inner_pack_spec}</span></div>
-        <div class="detail-row"><span class="label">外包物料</span><span class="value">${order.outer_pack_spec}</span></div>
-        ${(order.product_children||[]).length ? '<div style="margin-top:8px;font-size:13px;color:var(--accent)"><strong>子产品组合：</strong>'+order.product_children.map(function(c){return c.name+'×'+c.quantity}).join(' / ')+'</div>' : ''}
+        <div class="detail-row"><span class="label">单号</span><span class="value" style="font-weight:800">${esc(order.order_no)}</span></div>
+        <div class="detail-row"><span class="label">客户</span><span class="value">${esc(order.customer_name)} · ${esc(order.customer_contact||'-')}</span></div>
+        <div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:800;color:var(--accent)">${order.quantity}</span></div>
+        ${order.deadline ? '<div class="detail-row"><span class="label">交付期限</span><span class="value" style="color:var(--error)">⚠️ '+esc(order.deadline)+'</span></div>' : ''}
       </div>
-      <div class="card">
+
+      <!-- 产品色号 -->
+      <div class="detail-section">
+        <h3>🎨 产品信息</h3>
+        <div class="detail-row"><span class="label">产品名称</span><span class="value" style="font-weight:700">${esc(order.product_name)}</span></div>
+        <div class="detail-row"><span class="label">产品色号</span><span class="value">${ccHtml}</span></div>
+        <div class="detail-row"><span class="label">内包材规格</span><span class="value">${esc(order.inner_pack_spec||'-')}${order.inner_pack_qty ? ' ×'+order.inner_pack_qty : ''}</span></div>
+        ${order.product_details ? '<div class="detail-row"><span class="label">产品备注</span><span class="value">'+esc(order.product_details)+'</span></div>' : ''}
+      </div>
+
+      ${itemsHtml}
+      ${childrenHtml}
+      ${boxSpecHtml}
+      ${cartonSpecHtml}
+
+      <!-- 打包登记表单 -->
+      <div class="card" style="margin-top:12px">
         <div class="form-group">
           <label>打包方式说明 *</label>
-          <textarea class="form-input" id="pack-method" placeholder="每袋多少个、每盒几袋、每箱几盒等"></textarea>
+          <textarea class="form-input" id="pack-method" placeholder="例：每袋装5颗 → 每盒装2袋（10颗/盒）→ 每箱装12盒（120颗/箱）"></textarea>
         </div>
         <div class="form-group">
           <label>打包日期</label>
@@ -1127,10 +1191,11 @@ async function renderPackComplete() {
           <label>产品生产日期</label>
           <input class="form-input" id="pack-prod-date" type="date" value="${new Date().toISOString().slice(0,10)}">
         </div>
-        <button class="btn btn-success btn-block" onclick="completePack()">打包完成（流程闭环）</button>
+        <button class="btn btn-success btn-block" onclick="completePack()">✅ 打包完成（流程闭环）</button>
         <button class="btn btn-outline btn-block" style="margin-top:8px" onclick="navigate('pack-list')">取消</button>
       </div>
-    </div>`;
+    </div>
+    ${renderTabBar('pack-complete')}`;
 }
 
 async function completePack() {
@@ -1143,6 +1208,98 @@ async function completePack() {
   const res = await API.post(`/api/orders/${window._packOrderId}/packaging`, { pack_method, pack_date, pack_worker, nutrition_label, production_date });
   if (res.success) { showToast('打包完成，订单已闭环！', 'success'); navigate('pack-list'); }
   else showToast(res.msg || '提交失败', 'error');
+}
+
+// 外包材领料申请
+async function renderPackRequisition() {
+  var orders = [];
+  var outMats = [];
+  try { orders = await API.get('/api/orders?status=qc_passed'); } catch(e) {}
+  try { outMats = await API.get('/api/outer-pack-materials'); } catch(e) {}
+
+  window._reqMats = outMats;
+  window._reqOrders = orders;
+
+  $('#app').innerHTML = `
+    <div class="page-header"><h1>📋 外包材领料</h1><span class="role-badge">外包打包</span></div>
+    <div class="page-content">
+      <div class="detail-section" style="background:var(--bg-secondary);padding:12px;border-radius:8px;margin-bottom:12px">
+        <div style="font-size:13px;color:var(--text-secondary)">💡 外包材领料申请将发送至仓库，仓库确认后发放。建议关联对应订单方便追踪。</div>
+      </div>
+      <div class="form-group">
+        <label>选择外包材 *</label>
+        <select class="form-input" id="pack-req-material" onchange="onPackReqMatChange()">
+          <option value="">-- 请选择外包材 --</option>
+          ${outMats.map(function(m){
+            var low = m.stock_qty < (m.min_alert||0);
+            return '<option value="'+m.id+'">'+esc(m.name)+' ('+esc(m.spec||'')+') | '+m.box_type+' | 库存:'+m.stock_qty+(low?' ⚠️低库存':'')+'</option>';
+          }).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>领料数量 *</label>
+        <input class="form-input" id="pack-req-qty" type="number" min="1" placeholder="请输入领用数量">
+      </div>
+      <div class="form-group">
+        <label>关联订单（可选）</label>
+        <select class="form-input" id="pack-req-order">
+          <option value="">-- 不关联订单 --</option>
+          ${orders.map(function(o){
+            return '<option value="'+o.id+'|'+esc(o.order_no)+'">'+esc(o.order_no)+' · '+esc(o.customer_name)+' · '+esc(o.product_name)+' ×'+o.quantity+'</option>';
+          }).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>用途说明</label>
+        <input class="form-input" id="pack-req-note" placeholder="如：订单QK000001的飞机盒和外箱">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="submitPackRequisition()">📤 提交领料申请</button>
+    </div>
+    ${renderTabBar('pack-requisition')}`;
+}
+
+function onPackReqMatChange() {
+  var mid = parseInt(document.getElementById('pack-req-material').value);
+  var m = (window._reqMats||[]).find(function(x){return x.id === mid;});
+  if (m && document.getElementById('pack-req-note')) {
+    var cur = document.getElementById('pack-req-note').value;
+    if (!cur) document.getElementById('pack-req-note').value = '外包材: '+m.name+' '+m.spec;
+  }
+}
+
+async function submitPackRequisition() {
+  var mid = parseInt(document.getElementById('pack-req-material').value);
+  var qty = parseInt(document.getElementById('pack-req-qty').value);
+  var orderVal = document.getElementById('pack-req-order').value;
+  var note = document.getElementById('pack-req-note').value.trim();
+
+  if (!mid || !qty || qty < 1) return showToast('请完善领料信息', 'error');
+
+  var orderId = null, orderNo = '';
+  if (orderVal) {
+    var parts = orderVal.split('|');
+    orderId = parseInt(parts[0]);
+    orderNo = parts[1] || '';
+  }
+
+  var res = await API.post('/api/material-requisitions', {
+    type: 'outer',
+    material_id: mid,
+    quantity: qty,
+    order_id: orderId,
+    order_no: orderNo,
+    note: note
+  });
+
+  if (res.success) {
+    showToast('外包材领料申请已提交至仓库', 'success');
+    document.getElementById('pack-req-material').value = '';
+    document.getElementById('pack-req-qty').value = '';
+    document.getElementById('pack-req-order').value = '';
+    document.getElementById('pack-req-note').value = '';
+  } else {
+    showToast(res.msg || '提交失败', 'error');
+  }
 }
 
 // ===== 总台监控端 =====
@@ -1698,6 +1855,7 @@ function renderTabBar(activeTab) {
     packaging: [
       { id: 'dashboard', icon: '🏠', label: '首页' },
       { id: 'pack-list', icon: '📦', label: '打包' },
+      { id: 'pack-requisition', icon: '📋', label: '领料' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
