@@ -349,7 +349,7 @@ app.get('/api/dispatch-stats', requireRole('supervisor','admin','console'), func
     s.is_warning = false;
     stats.forEach(function(x) { if (x.team_id !== s.team_id && s.dispatch_count - x.dispatch_count >= threshold) s.is_warning = true; });
   });
-  res.json({ stats: stats, threshold: threshold, month: month });
+  res.json(stats);
 });
 
 // 生产填报（支持分批）
