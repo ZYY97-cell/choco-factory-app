@@ -32,7 +32,9 @@ function showToast(msg, type = '') {
   t.className = `toast ${type}`;
   t.textContent = msg;
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2500);
+  // 分级显示时长：error/warning 4s, success 2.5s, 其他 3s
+  var dur = type === 'error' || type === 'warning' ? 4000 : type === 'success' ? 2500 : 3000;
+  setTimeout(() => t.remove(), dur);
 }
 
 const STATUS_MAP = {
@@ -45,12 +47,24 @@ const STATUS_MAP = {
   qc_failed: { label: '质检不合格', class: 'status-qc_failed' },
   rework: { label: '待补产', class: 'status-rework' },
   packaging: { label: '打包中', class: 'status-packaging' },
-  completed: { label: '已完成', class: 'status-completed' }
+  completed: { label: '已完成', class: 'status-completed' },
+  cancelled: { label: '已取消', class: 'status-cancelled' }
 };
 
 function statusTag(status) {
   const s = STATUS_MAP[status] || { label: status, class: '' };
   return `<span class="status-tag ${s.class}">${s.label}</span>`;
+}
+
+// 悬浮采购按钮
+function initFloatingButton() {
+  if (document.querySelector('.fab-btn')) return;
+  var fab = document.createElement('div');
+  fab.className = 'fab-btn';
+  fab.innerHTML = '🛒';
+  fab.title = '采购申请';
+  fab.onclick = function() { navigate('purchase-request'); };
+  document.body.appendChild(fab);
 }
 
 function formatTime(t) {
@@ -138,7 +152,7 @@ function renderLogin() {
         </div>
         <button class="btn btn-primary" onclick="doLogin()">登 录</button>
         <div style="margin-top:16px;font-size:12px;color:#999;text-align:center">
-          预设账号：clerk1 / supervisor1 / team1<br>qc1 / pack1 / console1 / finance1<br>warehouse1 / admin · 密码 123456
+          预设账号：wenyuan / shengchang / shengchanA<br>zhijian / dabao / zongkong / caiwu<br>cangguan / caigou / admin · 密码 123456
         </div>
       </div>
     </div>`;
@@ -161,6 +175,24 @@ async function doLogin() {
 }
 
 // ===== 仪表板 =====
+// 根据角色获取对应的订单列表页
+function getOrderListPage(role) {
+  var map = {
+    clerk: 'clerk-orders',
+    supervisor: 'supervisor-pending',
+    team: 'team-list',
+    qc: 'qc-list',
+    packaging: 'pack-list',
+    console: 'console-orders',
+    finance: 'clerk-orders',
+    warehouse: 'clerk-orders',
+    procurement: 'clerk-orders',
+    preparation: 'clerk-orders',
+    admin: 'clerk-orders'
+  };
+  return map[role] || 'clerk-orders';
+}
+
 async function renderDashboard() {
   try {
   const roleTabs = {
@@ -222,6 +254,9 @@ async function renderDashboard() {
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     warehouse: [
+      { id: 'warehouse-procurement', icon: '📋', label: '采购处理' },
+      { id: 'purchase-list', icon: '📊', label: '采购审批' },
+      { id: 'warehouse-suppliers', icon: '🏢', label: '供应商' },
       { id: 'warehouse-materials', icon: '🧈', label: '原材料' },
       { id: 'warehouse-inner', icon: '📥', label: '内包材' },
       { id: 'warehouse-outer', icon: '📦', label: '外包材' },
@@ -233,18 +268,8 @@ async function renderDashboard() {
       { id: 'warehouse-ledger', icon: '📒', label: '台账' },
       { id: 'purchase-request', icon: '🛒', label: '采购申请' },
       { id: 'my-purchases', icon: '📝', label: '我的采购' },
-      { id: 'notifications', icon: '🔔', label: '消息' }
-    ],
-    warehouse_admin: [
-      { id: 'warehouse-procurement', icon: '📋', label: '采购处理' },
-      { id: 'purchase-list', icon: '📊', label: '采购审批' },
-      { id: 'warehouse-suppliers', icon: '🏢', label: '供应商' },
-      { id: 'warehouse-materials', icon: '🧈', label: '原材料' },
-      { id: 'warehouse-finished', icon: '🏭', label: '成品仓' },
-      { id: 'warehouse-outbound', icon: '🚚', label: '出库' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
-      { id: 'my-purchases', icon: '📝', label: '我的采购' },
-      { id: 'notifications', icon: '🔔', label: '消息' }
+      { id: 'notifications', icon: '🔔', label: '消息' },
+      { id: 'stats', icon: '📊', label: '统计' }
     ],
     procurement: [
       { id: 'warehouse-procurement', icon: '📋', label: '采购处理' },
@@ -272,7 +297,7 @@ async function renderDashboard() {
   const tabs = roleTabs[currentUser.role] || [];
   const stats = await API.get('/api/stats/overview');
   
-  const roleNames = { clerk: '文员', supervisor: '生产组长', team: '生产班组', qc: '内包质检', packaging: '外包打包', console: '总台', finance: '财务', warehouse: '仓库管理', warehouse_admin: '仓管负责人', procurement: '采购专员', preparation: '配料人员', admin: '管理员' };
+  const roleNames = { clerk: '文员', supervisor: '生产组长', team: '生产班组', qc: '内包质检', packaging: '外包打包', console: '总台', finance: '财务', warehouse: '仓库管理', procurement: '采购专员', preparation: '配料人员', admin: '管理员' };
 
   $('#app').innerHTML = `
     <div class="page-header">
@@ -281,10 +306,10 @@ async function renderDashboard() {
     </div>
     <div class="page-content">
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-value">${stats.total||0}</div><div class="stat-label">总订单</div></div>
-        <div class="stat-card"><div class="stat-value" style="color:#D48806">${stats.pending||0}</div><div class="stat-label">待派单</div></div>
-        <div class="stat-card"><div class="stat-value" style="color:#1890FF">${stats.producing||0}</div><div class="stat-label">生产中</div></div>
-        <div class="stat-card"><div class="stat-value" style="color:#52C41A">${stats.completed||0}</div><div class="stat-label">已完成</div></div>
+        <div class="stat-card" style="cursor:pointer" onclick="navigate(getOrderListPage(currentUser.role))"><div class="stat-value">${stats.total||0}</div><div class="stat-label">总订单</div></div>
+        <div class="stat-card" style="cursor:pointer" onclick="navigate(getOrderListPage(currentUser.role))"><div class="stat-value" style="color:#D48806">${stats.pending||0}</div><div class="stat-label">待派单</div></div>
+        <div class="stat-card" style="cursor:pointer" onclick="navigate(getOrderListPage(currentUser.role))"><div class="stat-value" style="color:#1890FF">${stats.producing||0}</div><div class="stat-label">生产中</div></div>
+        <div class="stat-card" style="cursor:pointer" onclick="navigate(getOrderListPage(currentUser.role))"><div class="stat-value" style="color:#52C41A">${stats.completed||0}</div><div class="stat-label">已完成</div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         ${tabs.map(t => `
@@ -586,113 +611,264 @@ async function openDispatch(orderId) {
   var dispatchStats = ds.stats || ds;
   var threshold = ds.threshold || 3;
   var items = order.items || [];
-  var hasMulti = items.length > 1;
+  // 如果items为空，构造单产品
+  if (!items.length) {
+    items = [{ product_id: order.product_id, product_name: order.product_name, quantity: order.quantity }];
+  }
+  window._dispatchItems = items;
+  window._dispatchTeams = teams;
+  // 默认模式：按产品拆分
+  window._dispatchMode = 'byProduct';
+  window._dispatchSelections = {};
   
   var modal = document.createElement('div');
   modal.className = 'modal-overlay';
   modal.id = 'dispatch-modal';
-  
-  var renderTeamCard = function(t, extra) {
-    var stat = dispatchStats.find(function(s){return s.team_id===t.id;}) || { dispatch_count: 0, total_quantity: 0 };
-    var otherMin = Math.min.apply(null, dispatchStats.filter(function(s){return s.team_id!==t.id;}).map(function(s){return s.dispatch_count;}));
-    var isWarning = stat.dispatch_count - otherMin >= threshold;
-    return '<div class="team-dispatch-card '+(isWarning?'warning':'')+'" onclick="selectTeam(this,'+t.id+','+(extra||'\'')+')" data-team-id="'+t.id+'" data-extra="'+(extra||'')+'">' +
-      '<div class="team-info"><div class="team-name">'+esc(t.name)+' '+(isWarning?'<span class="warning-badge">⚠️ 偏多</span>':'')+'</div>' +
-      '<div class="team-stats">本月接单：'+stat.dispatch_count+' 次 | 累计产量：'+(stat.total_quantity||0)+'</div></div>' +
-      '<div style="font-size:20px;color:var(--border)">○</div></div>';
-  };
-
-  if (hasMulti) {
-    // 多产品模式：显示每个产品 + 班组选择，也支持整体分配
-    var prodRows = items.map(function(it, i) {
-      return '<div style="margin-bottom:12px;padding:10px;background:#fdf8f3;border-radius:8px">' +
-        '<div style="font-weight:700;margin-bottom:6px">📦 产品'+(i+1)+': '+esc(it.product_name)+' ×'+it.quantity+'</div>' +
-        '<div style="margin-bottom:4px;font-size:12px;color:var(--text-secondary)">选择班组：</div>' +
-        '<div id="dispatch-teams-'+i+'">' + teams.map(function(t){return renderTeamCard(t, 'item_'+i);}).join('') + '</div></div>';
-    }).join('');
-    
-    // 整体分配模式
-    var allRow = '<div style="margin-bottom:12px;padding:10px;background:#e8f5e9;border-radius:8px;border:2px dashed var(--success)">' +
-      '<div style="font-weight:700;margin-bottom:4px;color:var(--success)">🎯 整体分配（所有产品给同一班组）</div>' +
-      '<div style="margin-bottom:4px;font-size:12px;color:var(--text-secondary)">点击下方班组即可一次性分配全部产品</div>' +
-      '<div id="dispatch-teams-all">' + teams.map(function(t){return renderTeamCard(t, 'all');}).join('') + '</div></div>';
-
-    modal.innerHTML = '<div class="modal-content"><div class="modal-header"><h3>📌 派单 - '+esc(order.order_no)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>' +
-      '<div class="detail-section" style="margin-bottom:12px"><div class="detail-row"><span class="label">客户</span><span class="value">'+esc(order.customer_name)+'</span></div>' +
-      '<div class="detail-row"><span class="label">总数量</span><span class="value" style="font-weight:700;color:var(--primary)">'+order.quantity+'</span></div></div>' +
-      '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">💡 可逐个产品拆分给不同班组，或使用"整体分配"一次分配全部</div>' +
-      prodRows + allRow +
-      '<button class="btn btn-primary btn-block" style="margin-top:12px" onclick="confirmDispatch()">确认派单</button></div>';
-    
-    window._dispatchMulti = true;
-    window._dispatchItems = items;
-    // 存储每个产品/整体的选中班组：{ 'item_0': teamId, 'all': teamId }
-    window._dispatchSelections = {};
-  } else {
-    // 单产品模式（原逻辑）
-    modal.innerHTML = '<div class="modal-content"><div class="modal-header"><h3>📌 派单 - '+esc(order.order_no)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>' +
-      '<div class="detail-section" style="margin-bottom:12px"><div class="detail-row"><span class="label">客户</span><span class="value">'+esc(order.customer_name)+'</span></div>' +
-      '<div class="detail-row"><span class="label">产品</span><span class="value">'+esc(order.product_name)+'</span></div>' +
-      '<div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:700;color:var(--primary)">'+order.quantity+'</span></div></div>' +
-      '<h4 style="margin-bottom:8px">选择生产班组：</h4>' +
-      '<div id="dispatch-teams">' + teams.map(function(t){return renderTeamCard(t, 'single');}).join('') + '</div>' +
-      '<button class="btn btn-primary btn-block" style="margin-top:16px" onclick="confirmDispatch()">确认派单</button></div>';
-    window._dispatchMulti = false;
-  }
-
+  buildDispatchModal(modal, order, teams, items, dispatchStats, threshold);
   document.body.appendChild(modal);
-  window._selectedTeamId = null;
   } catch(e) {
     console.error('openDispatch error:', e);
     showToast('派单数据加载失败，请刷新重试', 'error');
   }
 }
 
-function selectTeam(el, teamId, extra) {
-  var cards = el.parentElement.querySelectorAll('.team-dispatch-card');
-  cards.forEach(function(c) { c.classList.remove('selected'); });
-  el.classList.add('selected');
+function buildDispatchModal(modal, order, teams, items, dispatchStats, threshold) {
+  var mode = window._dispatchMode || 'byProduct';
   
-  if (window._dispatchMulti) {
-    if (!window._dispatchSelections) window._dispatchSelections = {};
-    window._dispatchSelections[extra || 'single'] = teamId;
+  var renderTeamCard = function(t, extra, showQty) {
+    var stat = dispatchStats.find(function(s){return s.team_id===t.id;}) || { dispatch_count: 0, total_quantity: 0 };
+    var otherMin = Math.min.apply(null, dispatchStats.filter(function(s){return s.team_id!==t.id;}).map(function(s){return s.dispatch_count;}));
+    var isWarning = stat.dispatch_count - otherMin >= threshold;
+    var cls = 'team-dispatch-card' + (isWarning?' warning':'');
+    if (showQty) {
+      // 按数量拆分模式：带数量输入框
+      return '<div class="'+cls+'" data-team-id="'+t.id+'">' +
+        '<div class="team-info"><div class="team-name">'+esc(t.name)+' '+(isWarning?'<span class="warning-badge">⚠️ 偏多</span>':'')+'</div>' +
+        '<div class="team-stats">本月接单：'+stat.dispatch_count+' 次 | 累计产量：'+(stat.total_quantity||0)+'</div></div>' +
+        '<div style="display:flex;align-items:center;gap:6px;margin-top:6px">' +
+        '<input class="form-input dispatch-qty-input" data-team-id="'+t.id+'" data-extra="'+(extra||'')+'" type="number" min="0" placeholder="0" style="width:80px;padding:6px;font-size:13px" oninput="onDispatchQtyChange(this)" value="0">' +
+        '<span style="font-size:12px;color:var(--text-secondary)">件</span></div></div>';
+    }
+    return '<div class="'+cls+'" onclick="selectTeam(this,'+t.id+','+(extra||'\'')+')" data-team-id="'+t.id+'" data-extra="'+(extra||'')+'">' +
+      '<div class="team-info"><div class="team-name">'+esc(t.name)+' '+(isWarning?'<span class="warning-badge">⚠️ 偏多</span>':'')+'</div>' +
+      '<div class="team-stats">本月接单：'+stat.dispatch_count+' 次 | 累计产量：'+(stat.total_quantity||0)+'</div></div>' +
+      '<div style="font-size:20px;color:var(--border)">○</div></div>';
+  };
+  
+  var modeTabs = '<div style="display:flex;gap:4px;margin-bottom:12px">' +
+    '<div class="dispatch-mode-tab'+(mode==='byProduct'?' active':'')+'" onclick="switchDispatchMode(\'byProduct\')" style="flex:1;text-align:center;padding:8px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;'+(mode==='byProduct'?'background:var(--primary);color:#fff':'background:#f0ebe3;color:var(--text-secondary)')+'">📦 按产品拆分</div>' +
+    '<div class="dispatch-mode-tab'+(mode==='byQuantity'?' active':'')+'" onclick="switchDispatchMode(\'byQuantity\')" style="flex:1;text-align:center;padding:8px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;'+(mode==='byQuantity'?'background:var(--primary);color:#fff':'background:#f0ebe3;color:var(--text-secondary)')+'">🔢 按数量拆分</div></div>';
+  
+  var bodyHtml = '';
+  if (mode === 'byProduct') {
+    // 按产品拆分模式
+    bodyHtml = items.map(function(it, i) {
+      return '<div style="margin-bottom:12px;padding:10px;background:#fdf8f3;border-radius:8px">' +
+        '<div style="font-weight:700;margin-bottom:6px">📦 产品'+(i+1)+': '+esc(it.product_name)+' ×'+it.quantity+'</div>' +
+        '<div style="margin-bottom:4px;font-size:12px;color:var(--text-secondary)">选择班组：</div>' +
+        '<div id="dispatch-teams-'+i+'">' + teams.map(function(t){return renderTeamCard(t, 'item_'+i);}).join('') + '</div>' +
+        '<div class="dispatch-status" id="dispatch-status-'+i+'"></div></div>';
+    }).join('');
+    // 整体分配
+    if (items.length > 1) {
+      bodyHtml += '<div style="margin-bottom:12px;padding:10px;background:#e8f5e9;border-radius:8px;border:2px dashed var(--success)">' +
+        '<div style="font-weight:700;margin-bottom:4px;color:var(--success)">🎯 整体分配（所有产品给同一班组）</div>' +
+        '<div id="dispatch-teams-all">' + teams.map(function(t){return renderTeamCard(t, 'all');}).join('') + '</div></div>';
+    }
   } else {
-    window._selectedTeamId = teamId;
+    // 按数量拆分模式
+    bodyHtml = items.map(function(it, i) {
+      var tid = items.length > 1 ? ('item_'+i) : 'qty';
+      return '<div style="margin-bottom:14px;padding:12px;background:#fdf8f3;border-radius:8px">' +
+        '<div style="font-weight:700;margin-bottom:4px">📦 产品'+(items.length>1?(''+(i+1)+': '):'')+esc(it.product_name)+' <span style="color:var(--primary)">总量 '+it.quantity+' 件</span></div>' +
+        '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">为每个班组分配数量（总和='+it.quantity+'）：</div>' +
+        '<div id="dispatch-qtyteams-'+tid+'">' + teams.map(function(t){return renderTeamCard(t, tid+'_team'+t.id, true);}).join('') + '</div>' +
+        '<div style="margin-top:6px;font-size:12px" id="dispatch-qty-summary-'+tid+'"><span style="color:var(--danger)">已分配: <b id="dqty-alloc-'+tid+'">0</b> / '+it.quantity+' 件</span></div></div>';
+    }).join('');
+  }
+  
+  modal.innerHTML = '<div class="modal-content" style="max-height:85vh;overflow-y:auto">' +
+    '<div class="modal-header"><h3>📌 派单 - '+esc(order.order_no)+'</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>' +
+    '<div class="detail-section" style="margin-bottom:8px"><div class="detail-row"><span class="label">客户</span><span class="value">'+esc(order.customer_name)+'</span></div>' +
+    '<div class="detail-row"><span class="label">总数量</span><span class="value" style="font-weight:700;color:var(--primary)">'+order.quantity+'</span></div></div>' +
+    modeTabs + bodyHtml +
+    '<button class="btn btn-primary btn-block" style="margin-top:12px" onclick="confirmDispatch()">确认派单</button></div>';
+}
+
+// 切换派单模式
+function switchDispatchMode(mode) {
+  window._dispatchMode = mode;
+  window._dispatchSelections = {};
+  window._dispatchQtySelections = {};
+  var modal = document.getElementById('dispatch-modal');
+  if (!modal) return;
+  var orderId = window._dispatchOrderId;
+  if (!orderId) return;
+  API.get('/api/orders/' + orderId).then(function(order) {
+    var items = order.items || [];
+    if (!items.length) items = [{ product_id: order.product_id, product_name: order.product_name, quantity: order.quantity }];
+    var teams = window._dispatchTeams || [];
+    var ds = window._dispatchStats || { stats: [], threshold: 3 };
+    buildDispatchModal(modal, order, teams, items, ds.stats || ds, ds.threshold || 3);
+  }).catch(function() {
+    // fallback: rebuild with cached data
+    buildDispatchModal(modal, { order_no: '?', customer_name: '?', quantity: 0 }, window._dispatchTeams || [], window._dispatchItems || [], [], 3);
+  });
+}
+
+// 数量输入变化
+function onDispatchQtyChange(el) {
+  var teamId = parseInt(el.dataset.teamId);
+  var extra = el.dataset.extra || 'qty';
+  var val = parseInt(el.value) || 0;
+  if (val < 0) { el.value = 0; val = 0; }
+  
+  if (!window._dispatchQtySelections) window._dispatchQtySelections = {};
+  if (!window._dispatchQtySelections[extra]) window._dispatchQtySelections[extra] = {};
+  window._dispatchQtySelections[extra][teamId] = val;
+  
+  // 更新汇总
+  updateQtySummary(extra);
+}
+
+function updateQtySummary(extra) {
+  var sel = (window._dispatchQtySelections && window._dispatchQtySelections[extra]) || {};
+  var total = 0;
+  for (var k in sel) { total += sel[k] || 0; }
+  
+  var allocEl = document.getElementById('dqty-alloc-' + extra);
+  if (allocEl) allocEl.textContent = total;
+  
+  // 获取目标数量
+  var items = window._dispatchItems || [];
+  var target = 0;
+  if (extra === 'qty') {
+    target = items[0] ? items[0].quantity : 0;
+  } else if (extra && extra.startsWith('item_')) {
+    var idx = parseInt(extra.split('_')[1]);
+    target = items[idx] ? items[idx].quantity : 0;
+  }
+  
+  // 颜色提示
+  var summaryEl = document.getElementById('dispatch-qty-summary-' + extra);
+  if (summaryEl && target > 0) {
+    if (total === target) {
+      summaryEl.innerHTML = '<span style="color:var(--success)">✅ 已分配: <b>' + total + '</b> / ' + target + ' 件（刚好）</span>';
+    } else if (total > target) {
+      summaryEl.innerHTML = '<span style="color:var(--danger)">⚠️ 已分配: <b>' + total + '</b> / ' + target + ' 件（超出 ' + (total-target) + '）</span>';
+    } else {
+      summaryEl.innerHTML = '<span style="color:var(--warning)">已分配: <b>' + total + '</b> / ' + target + ' 件（还差 ' + (target-total) + '）</span>';
+    }
   }
 }
 
 async function confirmDispatch() {
-  if (window._dispatchMulti) {
-    // 多产品派单模式
+  var mode = window._dispatchMode || 'byProduct';
+  var itms = window._dispatchItems || [];
+  var items = [];
+  
+  if (mode === 'byQuantity') {
+    // 按数量拆分模式
+    var qtySels = window._dispatchQtySelections || {};
+    var errors = [];
+    var warnings = [];
+    itms.forEach(function(it, i) {
+      var extra = itms.length > 1 ? ('item_'+i) : 'qty';
+      var sel = qtySels[extra] || {};
+      var subtotal = 0;
+      for (var teamId in sel) {
+        var qty = sel[teamId] || 0;
+        if (qty > 0) {
+          items.push({ team_id: parseInt(teamId), product_id: it.product_id, dispatch_qty: qty });
+          subtotal += qty;
+        }
+      }
+      if (subtotal === 0) {
+        errors.push('产品'+(itms.length>1?(''+(i+1)+' '):'')+esc(it.product_name)+'：未分配任何数量');
+      } else if (subtotal !== it.quantity) {
+        warnings.push('产品'+(itms.length>1?(''+(i+1)+' '):'')+esc(it.product_name)+'：已分配'+subtotal+'/'+it.quantity+'（差额'+(it.quantity-subtotal)+'）');
+      }
+    });
+    if (errors.length > 0) {
+      return showToast('请为以下产品分配数量：' + errors.join('；'), 'error');
+    }
+    if (warnings.length > 0 && !confirm('以下产品数量未完全分配：\n' + warnings.join('\n') + '\n\n已分配的数量将立即派单，剩余数量保留待派状态。\n\n确定继续？')) {
+      return;
+    }
+    if (!items.length) {
+      return showToast('请为至少一个班组填写分配数量', 'error');
+    }
+  } else {
+    // 按产品拆分模式
     var sels = window._dispatchSelections || {};
-    var items = [];
-    // 检查整体分配
-    if (sels.all) {
-      var itms = window._dispatchItems || [];
+    var missing = [];
+    var hasIndividual = false;
+    
+    itms.forEach(function(it, i) {
+      var key = 'item_' + i;
+      if (sels[key]) {
+        items.push({ team_id: sels[key], product_id: it.product_id });
+        hasIndividual = true;
+      } else {
+        missing.push(i);
+      }
+    });
+    
+    if (!hasIndividual && sels.all) {
       itms.forEach(function(it) {
         items.push({ team_id: sels.all, product_id: it.product_id });
       });
-    } else {
-      // 逐个产品分配
-      var itms = window._dispatchItems || [];
-      var hasAny = false;
-      itms.forEach(function(it, i) {
-        if (sels['item_'+i]) {
-          items.push({ team_id: sels['item_'+i], product_id: it.product_id });
-          hasAny = true;
-        }
+    } else if (hasIndividual && sels.all && missing.length > 0) {
+      missing.forEach(function(i) {
+        items.push({ team_id: sels.all, product_id: itms[i].product_id });
       });
     }
-    if (!items.length) return showToast('请至少为一个产品选择班组', 'error');
     
-    var res = await API.post('/api/orders/'+window._dispatchOrderId+'/dispatch', { items: items });
-    if (res.success) { showToast('派单成功（'+items.length+'项）', 'success'); closeModal(); navigate('supervisor-pending'); }
-    else showToast(res.msg || '派单失败', 'error');
-  } else {
-    if (!window._selectedTeamId) return showToast('请选择一个班组', 'error');
-    var res = await API.post('/api/orders/'+window._dispatchOrderId+'/dispatch', { team_id: window._selectedTeamId });
-    if (res.success) { showToast('派单成功', 'success'); closeModal(); navigate('supervisor-pending'); }
-    else showToast(res.msg || '派单失败', 'error');
+    if (!items.length && window._selectedTeamId) {
+      var firstItem = itms[0] || {};
+      items.push({ team_id: window._selectedTeamId, product_id: firstItem.product_id || null });
+    }
+    
+    if (!items.length) {
+      return showToast('请至少为一个产品选择班组（可逐个选或使用整体分配）', 'error');
+    }
+    
+    // 允许部分派单：已选的产品先派，未选的保留待派状态
+    if (missing.length > 0 && !sels.all && hasIndividual) {
+      var names = missing.map(function(i) { return '产品' + (i+1); }).join('、');
+      if (!confirm('以下产品未分配班组：' + names + '\n\n已选 ' + items.length + ' 个产品将立即派单，剩余产品保留待派状态，可后续补派。\n\n确定只派已选产品？')) {
+        return;
+      }
+    }
+  }
+  
+  var res = await API.post('/api/orders/' + window._dispatchOrderId + '/dispatch', { items: items });
+  if (res.success) { showToast('派单成功（' + items.length + '条）', 'success'); closeModal(); navigate('supervisor-pending'); }
+  else showToast(res.msg || '派单失败', 'error');
+}
+
+// 按产品模式：点击选择班组
+function selectTeam(el, teamId, extra) {
+  var cards = el.parentElement.querySelectorAll('.team-dispatch-card');
+  cards.forEach(function(c) { c.classList.remove('selected'); });
+  el.classList.add('selected');
+  if (!window._dispatchSelections) window._dispatchSelections = {};
+  window._dispatchSelections[extra || 'single'] = teamId;
+  // 更新选中状态显示
+  updateDispatchStatus(extra, teamId);
+}
+
+// 更新派单状态提示
+function updateDispatchStatus(extra, teamId) {
+  if (!extra) return;
+  if (extra === 'all') return; // 整体分配不需要状态提示
+  var idx = null;
+  if (extra.startsWith('item_')) idx = extra.split('_')[1];
+  var statusEl = document.getElementById('dispatch-status-' + idx);
+  if (statusEl) {
+    var teams = window._dispatchTeams || [];
+    var t = teams.find(function(x) { return x.id === teamId; });
+    statusEl.innerHTML = '<span style="color:var(--success);font-weight:600">✅ 已选: ' + (t ? esc(t.name) : '班组' + teamId) + '</span>';
   }
 }
 
@@ -1682,6 +1858,21 @@ async function renderStats() {
   const defectStats = await API.get('/api/stats/defect');
   const prodStats = await API.get('/api/stats/production');
   
+  // 加载增强统计（逾期率、返工率、趋势、产能、库存预警）
+  var enhanced = { overdue_rate: '0', rework_rate: '0', trends: [], teams: [], low_stock: { raw: 0, inner: 0, outer: 0, items: [] } };
+  try { enhanced = await API.get('/api/stats/enhanced'); } catch(e) {}
+  
+  var trendBars = enhanced.trends.map(function(t) {
+    var maxH = Math.max(t.completed, t.created, 1);
+    var ch = Math.round(t.completed / maxH * 40);
+    var cr = Math.round(t.created / maxH * 40);
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:2px">' +
+      '<span style="font-size:11px;font-weight:600">' + t.completed + '</span>' +
+      '<div style="width:16px;height:' + ch + 'px;background:#52C41A;border-radius:3px 3px 0 0"></div>' +
+      '<div style="width:16px;height:' + cr + 'px;background:#1890FF;border-radius:3px 3px 0 0;margin-top:1px"></div>' +
+      '<span style="font-size:10px;color:var(--text-secondary)">' + t.date.slice(5) + '</span></div>';
+  }).join('');
+  
   $('#app').innerHTML = `
     <div class="page-header"><h1>📊 数据统计</h1></div>
     <div class="page-content">
@@ -1689,13 +1880,27 @@ async function renderStats() {
         <div class="stat-card"><div class="stat-value">${stats.total||0}</div><div class="stat-label">总订单</div></div>
         <div class="stat-card"><div class="stat-value" style="color:#52C41A">${stats.completed||0}</div><div class="stat-label">已完成</div></div>
         <div class="stat-card"><div class="stat-value" style="color:#D48806">${stats.pending||0}</div><div class="stat-label">待派单</div></div>
-        <div class="stat-card"><div class="stat-value" style="color:#CF1322">${stats.inspecting||0}</div><div class="stat-label">质检中</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#CF1322">${enhanced.overdue_rate}%</div><div class="stat-label">逾期率</div></div>
       </div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value" style="color:var(--info)">${enhanced.overdue_count||0}</div><div class="stat-label">逾期订单</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#D48806">${enhanced.rework_rate}%</div><div class="stat-label">返工率</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:#CF1322">${enhanced.low_stock.raw}</div><div class="stat-label">原料预警</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${stats.inspecting||0}</div><div class="stat-label">质检中</div></div>
+      </div>
+      ${trendBars ? `
       <div class="card">
-        <div class="card-title">🏭 班组产量统计</div>
-        ${prodStats.map(s => `
-          <div class="detail-row"><span class="label">${s.team_name}</span><span class="value">${s.order_count}单 / ${s.total_produced||0}个</span></div>
-        `).join('')}
+        <div class="card-title">📈 近7日趋势 <span style="font-size:11px;font-weight:normal;color:var(--text-secondary)">🟢完成 🔵新建</span></div>
+        <div style="display:flex;justify-content:space-around;align-items:flex-end;height:70px;padding-top:8px">${trendBars}</div>
+      </div>
+      ` : ''}
+      <div class="card">
+        <div class="card-title">🏭 班组产能</div>
+        ${enhanced.teams.map(function(t) {
+          var total = Math.max(t.completed + t.in_progress, 1);
+          var pct = Math.round(t.completed / total * 100);
+          return '<div class="detail-row"><span class="label">' + t.name + '</span><span class="value">✅' + t.completed + '单 / 🔄' + t.in_progress + '单 (' + pct + '%)</span></div>';
+        }).join('')}
       </div>
       <div class="card">
         <div class="card-title">⚠️ 不良品统计</div>
@@ -1707,6 +1912,14 @@ async function renderStats() {
         <div class="detail-row"><span class="label">破损</span><span class="value">${defectStats.broken||0}</span></div>
         <div class="detail-row"><span class="label">颜色不合格</span><span class="value">${defectStats.color_fail||0}</span></div>
       </div>
+      ${enhanced.low_stock.items.length > 0 ? `
+      <div class="card" style="border-left:3px solid #CF1322">
+        <div class="card-title">🚨 库存不足预警</div>
+        ${enhanced.low_stock.items.map(function(it) {
+          return '<div class="detail-row"><span class="label">' + (it.name||'') + '</span><span class="value" style="color:#CF1322">库存' + it.stock_qty + '</span></div>';
+        }).join('')}
+      </div>
+      ` : ''}
     </div>
     ${renderTabBar('stats')}`;
   } catch(e) {
@@ -1785,7 +1998,7 @@ async function renderAdmin() {
         ${users.map(u => `
           <div class="admin-item">
             <div><span class="item-name">${u.real_name}</span>
-            <span style="font-size:12px;color:var(--text-secondary);margin-left:6px">${u.username} · ${{clerk:'文员',supervisor:'组长',team:'班组',qc:'质检',packaging:'打包',admin:'管理员',console:'总台',finance:'财务',warehouse:'仓库',warehouse_admin:'仓库主管',procurement:'采购',preparation:'配料'}[u.role]||u.role}</span></div>
+            <span style="font-size:12px;color:var(--text-secondary);margin-left:6px">${u.username} · ${{clerk:'文员',supervisor:'组长',team:'班组',qc:'质检',packaging:'打包',admin:'管理员',console:'总台',finance:'财务',warehouse:'仓库',procurement:'采购',preparation:'配料'}[u.role]||u.role}</span></div>
             <div class="item-actions"><button class="btn btn-outline btn-sm" onclick="editUser(${u.id},'${u.real_name}')">改密</button></div>
           </div>
         `).join('')}
@@ -1984,19 +2197,14 @@ function renderTabBar(activeTab) {
     ],
     warehouse: [
       { id: 'dashboard', icon: '🏠', label: '首页' },
+      { id: 'warehouse-procurement', icon: '📋', label: '采购' },
+      { id: 'warehouse-suppliers', icon: '🏢', label: '供应商' },
       { id: 'warehouse-materials', icon: '🧈', label: '原料' },
       { id: 'warehouse-finished', icon: '🏭', label: '成品' },
       { id: 'warehouse-outbound', icon: '🚚', label: '出库' },
       { id: 'warehouse-inbound', icon: '📥', label: '入库' },
       { id: 'warehouse-receiving', icon: '📦', label: '到货' },
       { id: 'warehouse-ledger', icon: '📒', label: '台账' },
-      { id: 'notifications', icon: '🔔', label: '消息' }
-    ],
-    warehouse_admin: [
-      { id: 'dashboard', icon: '🏠', label: '首页' },
-      { id: 'warehouse-procurement', icon: '📋', label: '采购' },
-      { id: 'warehouse-suppliers', icon: '🏢', label: '供应商' },
-      { id: 'warehouse-materials', icon: '🧈', label: '原料' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     procurement: [
@@ -3304,6 +3512,7 @@ async function init() {
       currentUser = res.user;
       loadNotifications();
       navigate('dashboard');
+      initFloatingButton();
     } else {
       navigate('login');
     }

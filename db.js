@@ -35,7 +35,7 @@ function createTables() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('clerk','supervisor','team','qc','packaging','admin','console','finance','warehouse','warehouse_admin','procurement','preparation')),
+      role TEXT NOT NULL CHECK(role IN ('clerk','supervisor','team','qc','packaging','admin','console','finance','warehouse','procurement','preparation')),
       real_name TEXT NOT NULL,
       team_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -658,6 +658,47 @@ function createTables() {
   try { db.run("ALTER TABLE procurement_orders ADD COLUMN unit_price REAL"); } catch(e) {}
   try { db.run("ALTER TABLE dispatches ADD COLUMN product_id INTEGER"); } catch(e) {}
   try { db.run("ALTER TABLE dispatches ADD COLUMN notes TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE dispatches ADD COLUMN dispatch_qty INTEGER DEFAULT 0"); } catch(e) {}
+  try { db.run("ALTER TABLE orders ADD COLUMN cancel_reason TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE orders ADD COLUMN cancelled_by INTEGER"); } catch(e) {}
+  try { db.run("ALTER TABLE orders ADD COLUMN cancelled_at DATETIME"); } catch(e) {}
+  try { db.run("ALTER TABLE orders ADD COLUMN rework_count INTEGER DEFAULT 0"); } catch(e) {}
+  try { db.run("ALTER TABLE orders ADD COLUMN urgent_deadline TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE orders ADD COLUMN is_partial INTEGER DEFAULT 0"); } catch(e) {}
+  try { db.run("ALTER TABLE raw_materials ADD COLUMN standard_usage REAL DEFAULT 1"); } catch(e) {}
+  try { db.run("ALTER TABLE raw_materials ADD COLUMN season_factor REAL DEFAULT 1"); } catch(e) {}
+  try { db.run("ALTER TABLE raw_material_issues ADD COLUMN order_id INTEGER"); } catch(e) {}
+  try { db.run("ALTER TABLE raw_material_issues ADD COLUMN standard_usage REAL"); } catch(e) {}
+  try { db.run("ALTER TABLE raw_material_issues ADD COLUMN over_ratio REAL"); } catch(e) {}
+
+  // 审计日志表
+  db.run(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      username TEXT,
+      role TEXT,
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_id INTEGER,
+      detail TEXT,
+      ip TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // 归档记录
+  db.run(`
+    CREATE TABLE IF NOT EXISTS archive_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      archive_type TEXT NOT NULL,
+      data_summary TEXT,
+      row_count INTEGER DEFAULT 0,
+      file_path TEXT,
+      archived_by INTEGER,
+      archived_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS suppliers (
@@ -840,6 +881,36 @@ function createTables() {
       FOREIGN KEY (material_id) REFERENCES raw_materials(id)
     );
   `);
+
+  // ===== 28个数据库索引 =====
+  db.run("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_orders_deadline ON orders(deadline)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_dispatches_order ON dispatches(order_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_dispatches_team ON dispatches(team_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_productions_order ON productions(order_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_productions_team ON productions(team_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_inspections_order ON inspections(order_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_packagings_order ON packagings(order_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_notifications_role ON notifications(role)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(is_read)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_raw_materials_name ON raw_materials(name)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_inner_pack_name ON inner_pack_materials(name)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_outer_pack_name ON outer_pack_materials(name)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_auxiliary_name ON auxiliary_materials(name)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_inventory_ledger_type ON inventory_ledger(type)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_inventory_ledger_warehouse ON inventory_ledger(warehouse_type)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_inventory_ledger_material ON inventory_ledger(material_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_procurement_status ON procurement_orders(status)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_procurement_priority ON procurement_orders(priority)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_purchase_requests_status ON purchase_requests(status)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_purchase_requests_applicant ON purchase_requests(applicant_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_supplier_certs_supplier ON supplier_certificates(supplier_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_inbound_records_type ON inbound_records(warehouse_type)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_wage_records_order ON wage_records(order_id)");
 }
 
 function seedData() {
@@ -852,33 +923,39 @@ function seedData() {
 
   // 用户
   db.run("INSERT INTO users (username, password, role, real_name) VALUES ('admin', '" + hash('123456') + "', 'admin', '系统管理员')");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('clerk1', '" + hash('123456') + "', 'clerk', '文员小王')");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('supervisor1', '" + hash('123456') + "', 'supervisor', '组长李明')");
-  db.run("INSERT INTO users (username, password, role, real_name, team_id) VALUES ('team1', '" + hash('123456') + "', 'team', '班组1-张三', 1)");
-  db.run("INSERT INTO users (username, password, role, real_name, team_id) VALUES ('team2', '" + hash('123456') + "', 'team', '班组2-李四', 2)");
-  db.run("INSERT INTO users (username, password, role, real_name, team_id) VALUES ('team3', '" + hash('123456') + "', 'team', '班组3-王五', 3)");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('qc1', '" + hash('123456') + "', 'qc', '质检员赵六')");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('pack1', '" + hash('123456') + "', 'packaging', '打包员孙七')");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('console1', '" + hash('123456') + "', 'console', '总台监控')");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('finance1', '" + hash('123456') + "', 'finance', '财务刘会计')");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('warehouse1', '" + hash('123456') + "', 'warehouse', '普通仓管-吴库')");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('wh_admin1', '" + hash('123456') + "', 'warehouse_admin', '仓管负责人-周仓')");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('procurement1', '" + hash('123456') + "', 'procurement', '采购专员-郑采')");
-  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('prep1', '" + hash('123456') + "', 'preparation', '配料员-陈调')");
+  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('wenyuan', '" + hash('123456') + "', 'clerk', '文员小王')");
+  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('shengchang', '" + hash('123456') + "', 'supervisor', '组长李明')");
+  db.run("INSERT INTO users (username, password, role, real_name, team_id) VALUES ('shengchanA', '" + hash('123456') + "', 'team', '生产A班-张三', 1)");
+  db.run("INSERT INTO users (username, password, role, real_name, team_id) VALUES ('shengchanB', '" + hash('123456') + "', 'team', '生产B班-李四', 2)");
+  db.run("INSERT INTO users (username, password, role, real_name, team_id) VALUES ('shengchanC', '" + hash('123456') + "', 'team', '生产C班-王五', 3)");
+  db.run("INSERT INTO users (username, password, role, real_name, team_id) VALUES ('shengchanD', '" + hash('123456') + "', 'team', '生产D班-赵六', 4)");
+  db.run("INSERT INTO users (username, password, role, real_name, team_id) VALUES ('shengchanE', '" + hash('123456') + "', 'team', '生产E班-孙七', 5)");
+  db.run("INSERT INTO users (username, password, role, real_name, team_id) VALUES ('shengchanF', '" + hash('123456') + "', 'team', '生产F班-周八', 6)");
+  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('zhijian', '" + hash('123456') + "', 'qc', '质检员赵六')");
+  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('dabao', '" + hash('123456') + "', 'packaging', '打包员孙七')");
+  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('zongkong', '" + hash('123456') + "', 'console', '总台监控')");
+  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('caiwu', '" + hash('123456') + "', 'finance', '财务刘会计')");
+  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('cangguan', '" + hash('123456') + "', 'warehouse', '普通仓管-吴库')");
+  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('caigou', '" + hash('123456') + "', 'procurement', '采购专员-郑采')");
+  db.run("INSERT INTO users (username, password, role, real_name) VALUES ('peiliao', '" + hash('123456') + "', 'preparation', '配料员-陈调')");
 
   // 班组
-  db.run("INSERT INTO teams (name) VALUES ('班组1')");
-  db.run("INSERT INTO teams (name) VALUES ('班组2')");
-  db.run("INSERT INTO teams (name) VALUES ('班组3')");
-  db.run("INSERT INTO teams (name) VALUES ('班组4')");
+  db.run("INSERT INTO teams (name) VALUES ('生产A班')");
+  db.run("INSERT INTO teams (name) VALUES ('生产B班')");
+  db.run("INSERT INTO teams (name) VALUES ('生产C班')");
+  db.run("INSERT INTO teams (name) VALUES ('生产D班')");
+  db.run("INSERT INTO teams (name) VALUES ('生产E班')");
+  db.run("INSERT INTO teams (name) VALUES ('生产F班')");
 
   // 班组成员
-  var teams = [1,2,3,4];
+  var teams = [1,2,3,4,5,6];
   var memberNames = [
     ['张三','刘大','陈二','周八','吴九'],
     ['李四','黄大','杨二','马八','林九'],
     ['王五','赵大','钱二','孙八','郑九'],
-    ['冯六','何大','施二','张八','顾九']
+    ['冯六','何大','施二','张八','顾九'],
+    ['蒋七','于大','方二','秦八','魏九'],
+    ['许八','金大','苏二','潘八','葛九']
   ];
   teams.forEach(function(tid, i) {
     memberNames[i].forEach(function(name) {

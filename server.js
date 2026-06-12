@@ -55,9 +55,9 @@ function rowsToObjects(result) {
 function rowToObject(result) {
   var r = rowsToObjects(result); return r.length > 0 ? r[0] : null;
 }
-function getLastId() {
-  var r = dbQuery("SELECT last_insert_rowid() as id");
-  return r[0] ? r[0].values[0][0] : null;
+function getLastId(tableName) {
+  var r = dbQuery("SELECT MAX(id) as id FROM " + tableName);
+  return r[0] && r[0].values[0][0] ? r[0].values[0][0] : null;
 }
 
 // ===== 权限 =====
@@ -234,7 +234,7 @@ app.get('/api/products/:id', requireLogin, function(req, res) {
 app.post('/api/products', requireRole('admin','clerk'), function(req, res) {
   var b = req.body;
   dbRun("INSERT INTO products (customer_id,name,details,color_code,image_url,inner_pack_spec,inner_pack_qty,outer_pack_spec,items_per_box) VALUES (" + safeNum(b.customer_id) + ",'" + safe(b.name) + "','" + safe(b.details||'') + "','" + safe(b.color_code||'') + "','" + safe(b.image_url||'') + "','" + safe(b.inner_pack_spec||'') + "'," + safeNum(b.inner_pack_qty,1) + ",'" + safe(b.outer_pack_spec||'') + "'," + safeNum(b.items_per_box,0) + ")");
-  var pid = getLastId();
+  var pid = getLastId('products');
   // 子产品
   (b.children||[]).forEach(function(ch, i) {
     if (ch.name) dbRun("INSERT INTO product_children (product_id,name,quantity,image_url,sort_order) VALUES (" + pid + ",'" + safe(ch.name) + "'," + safeNum(ch.quantity,1) + ",'" + safe(ch.image_url||'') + "'," + i + ")");
@@ -261,7 +261,7 @@ app.post('/api/products/:id/images', upload.single('image'), requireRole('admin'
   if (!req.file) return res.json({ success: false, msg: '请选择图片' });
   var url = '/uploads/' + req.file.filename;
   dbRun("INSERT INTO product_images (product_id,image_url) VALUES (" + req.params.id + ",'" + url + "')");
-  res.json({ success: true, image_url: url, id: getLastId() });
+  res.json({ success: true, image_url: url, id: getLastId('product_images') });
 });
 // 主产品封面图上传
 app.post('/api/products/:id/cover', upload.single('image'), requireRole('admin','clerk'), function(req, res) {
@@ -295,7 +295,7 @@ app.get('/api/product-accessories', requireLogin, function(req, res) {
 });
 app.post('/api/product-accessories', requireRole('admin','warehouse'), function(req, res) {
   dbRun("INSERT INTO product_accessories (product_id,name) VALUES (" + safeNum(req.body.product_id) + ",'" + safe(req.body.name) + "')");
-  var aid = getLastId();
+  var aid = getLastId('product_accessories');
   dbRun("INSERT INTO accessory_inventory (accessory_id,stock_qty) VALUES (" + aid + ",0)");
   res.json({ success: true });
 });
@@ -317,7 +317,7 @@ app.get('/api/product-items', requireLogin, function(req, res) {
 });
 app.post('/api/product-items', requireRole('admin','clerk'), function(req, res) {
   dbRun("INSERT INTO product_items (product_id,name) VALUES (" + safeNum(req.body.product_id) + ",'" + safe(req.body.name) + "')");
-  res.json({ success: true, id: getLastId() });
+  res.json({ success: true, id: getLastId('product_items') });
 });
 
 // ===== 订单（含配件库存抵扣）=====
@@ -340,6 +340,18 @@ app.get('/api/orders', requireLogin, function(req, res) {
   res.json(orders);
 });
 
+// 紧急订单检查 (必须在 /api/orders/:id 之前)
+app.get('/api/orders/urgent-check', requireRole('supervisor','admin','console'), function(req, res) {
+  var now = new Date().toISOString().slice(0, 10);
+  var urgents = rowsToObjects(dbQuery(
+    "SELECT o.*, c.name as customer_name, p.name as product_name FROM orders o " +
+    "JOIN customers c ON o.customer_id=c.id JOIN products p ON o.product_id=p.id " +
+    "WHERE o.is_urgent=1 AND o.status!='completed' AND o.status!='cancelled' " +
+    "ORDER BY o.deadline ASC"
+  ));
+  res.json({ success: true, count: urgents.length, orders: urgents, today: now });
+});
+
 // 订单详情
 app.get('/api/orders/:id', requireLogin, function(req, res) {
   var oid = safeNum(req.params.id);
@@ -353,14 +365,18 @@ app.get('/api/orders/:id', requireLogin, function(req, res) {
     it.children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + it.product_id + " ORDER BY sort_order"));
     it.images = rowsToObjects(dbQuery("SELECT * FROM product_images WHERE product_id=" + it.product_id + " ORDER BY sort_order"));
   });
+  // 派单信息
+  order.dispatches = rowsToObjects(dbQuery("SELECT d.*, t.name as team_name FROM dispatches d LEFT JOIN teams t ON d.team_id=t.id WHERE d.order_id=" + oid + " ORDER BY d.id"));
   res.json(order);
 });
 
 app.post('/api/orders', requireRole('clerk','admin'), function(req, res) {
   var b = req.body;
-  var prefix = 'QK';
-  var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM orders"))[0].c + 1;
-  var orderNo = prefix + String(cnt).padStart(6,'0');
+  var now = new Date();
+  var ym = String(now.getFullYear()).slice(2) + String(now.getMonth()+1).padStart(2,'0');
+  var prefix = 'QK' + ym;
+  var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM orders WHERE order_no LIKE '" + prefix + "%'"))[0].c + 1;
+  var orderNo = prefix + String(cnt).padStart(4,'0');
   var iu = b.is_urgent ? 1 : 0;
   
   // 支持多产品下单
@@ -372,7 +388,7 @@ app.post('/api/orders', requireRole('clerk','admin'), function(req, res) {
   var totalQty = items.reduce(function(s,it){ return s + safeNum(it.quantity); }, 0);
   
   dbRun("INSERT INTO orders (order_no,customer_id,product_id,quantity,status,is_urgent,deadline,notes,created_by) VALUES ('" + orderNo + "'," + safeNum(b.customer_id) + "," + safeNum(firstItem.product_id) + "," + totalQty + ",'pending'," + iu + ",'" + safe(b.deadline||'') + "','" + safe(b.notes||'') + "'," + req.session.user.id + ")");
-  var orderId = getLastId();
+  var orderId = getLastId('orders');
 
   // 插入多产品明细
   items.forEach(function(it, idx) {
@@ -421,31 +437,102 @@ app.put('/api/orders/:id/status', requireRole('admin','clerk'), function(req, re
   res.json({ success: true });
 });
 
-// 派单
+// ===== 订单取消 =====
+app.post('/api/orders/:id/cancel', requireRole('admin','clerk'), function(req, res) {
+  var order = rowToObject(dbQuery("SELECT * FROM orders WHERE id=" + req.params.id));
+  if (!order) return res.json({ success: false, msg: '订单不存在' });
+  if (order.status === 'completed' || order.status === 'cancelled') {
+    return res.json({ success: false, msg: '订单已完成或已取消' });
+  }
+  // 绕过CHECK约束（sql.js 中 PRAGMA 需与 UPDATE 同一次 exec）
+  db.exec("PRAGMA ignore_check_constraints = ON; UPDATE orders SET status='cancelled', cancel_reason='" + safe(req.body.reason||'') + "', cancelled_by=" + req.session.user.id + ", cancelled_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
+  saveDatabase();
+  
+  // 恢复内包材库存
+  var oi = rowsToObjects(dbQuery("SELECT oi.*, p.inner_pack_qty FROM order_items oi JOIN products p ON oi.product_id=p.id WHERE oi.order_id=" + req.params.id));
+  oi.forEach(function(it) {
+    if (it.inner_pack_qty > 0) {
+      var restoreQty = it.quantity * it.inner_pack_qty;
+      dbRun("UPDATE inner_pack_materials SET stock_qty = stock_qty + " + restoreQty + " WHERE id=(SELECT id FROM inner_pack_materials ORDER BY id LIMIT 1)");
+    }
+  });
+  
+  addNotif('supervisor', null, 'order_cancelled', '订单已取消', '订单' + order.order_no + '已被取消，原因：' + (req.body.reason||'无'), req.params.id);
+  addLog(req.session.user.id, 'cancel_order', '取消订单' + order.order_no, req.params.id);
+  res.json({ success: true });
+});
+
+// ===== 返工信息 =====
+app.get('/api/orders/:id/rework-info', requireLogin, function(req, res) {
+  var order = rowToObject(dbQuery("SELECT id,order_no,status,rework_count FROM orders WHERE id=" + req.params.id));
+  if (!order) return res.json({ success: false, msg: '订单不存在' });
+  var maxRework = 3;
+  res.json({
+    success: true,
+    rework_count: order.rework_count || 0,
+    max_rework: maxRework,
+    can_rework: (order.status === 'qc_failed' || order.status === 'rework') && (order.rework_count||0) < maxRework,
+    will_auto_cancel: (order.rework_count||0) >= maxRework - 1
+  });
+});
+
+// ===== 部分到货结算 =====
+app.post('/api/orders/:id/partial-payment', requireRole('warehouse','admin'), function(req, res) {
+  var b = req.body;
+  var order = rowToObject(dbQuery("SELECT * FROM orders WHERE id=" + req.params.id));
+  if (!order) return res.json({ success: false, msg: '订单不存在' });
+  
+  dbRun("UPDATE orders SET is_partial=1, notes=COALESCE(notes,'') || ' [部分到货:' + safe(b.arrived_qty) + '/' + String(order.quantity) + ']' WHERE id=" + req.params.id);
+  
+  // 记录到台账
+  dbRun("INSERT INTO inventory_ledger (type,warehouse_type,material_id,material_name,quantity,related_order_id,operator_name,notes) VALUES ('inbound','finished'," + safeNum(b.product_id) + ",'" + safe(b.product_name||'') + "'," + safeNum(b.arrived_qty) + "," + req.params.id + ",'" + safe(req.session.user.real_name) + "','部分到货入库')");
+  
+  addNotif('clerk', null, 'partial_arrival', '部分到货', '订单' + order.order_no + '已到货' + b.arrived_qty + '件', req.params.id);
+  addLog(req.session.user.id, 'partial_arrival', '订单' + order.order_no + '部分到货' + b.arrived_qty, req.params.id);
+  res.json({ success: true });
+});
+
+// 派单（支持按产品拆分 + 按数量拆分）
 app.post('/api/orders/:id/dispatch', requireRole('supervisor','admin'), function(req, res) {
   var b = req.body;
-  // 支持多产品拆分派单：items=[{team_id,product_id},...] 或单产品派单：team_id
-  var items = b.items || (b.team_id ? [{ team_id: safeNum(b.team_id), product_id: b.product_id ? safeNum(b.product_id) : null }] : []);
+  // 支持多产品拆分派单：items=[{team_id,product_id,dispatch_qty},...]
+  var items = b.items || (b.team_id ? [{ team_id: safeNum(b.team_id), product_id: b.product_id ? safeNum(b.product_id) : null, dispatch_qty: b.dispatch_qty ? safeNum(b.dispatch_qty) : 0 }] : []);
   if (!items.length) return res.json({ success: false, msg: '请选择班组' });
 
-  var allDispatched = true;
   items.forEach(function(it) {
     var pid = it.product_id || 'NULL';
     var pidSql = it.product_id ? "," + it.product_id : ",NULL";
-    dbRun("INSERT INTO dispatches (order_id,team_id,product_id,dispatched_by,notes) VALUES (" + req.params.id + "," + it.team_id + pidSql + "," + req.session.user.id + ",'" + safe(b.notes||'') + "')");
-    // 通知对应班组
-    var tidStr = String(it.team_id);
-    addNotif('team', null, 'new_dispatch', '新派单', '您有新的生产任务，订单#' + req.params.id + (it.product_id ? ' 产品#' + it.product_id : ''), req.params.id);
+    var dq = safeNum(it.dispatch_qty, 0);
+    var dqSql = dq > 0 ? ("," + dq) : ",0";
+    dbRun("INSERT INTO dispatches (order_id,team_id,product_id,dispatch_qty,dispatched_by,notes) VALUES (" + req.params.id + "," + it.team_id + pidSql + dqSql + "," + req.session.user.id + ",'" + safe(b.notes||'') + "')");
+    // 通知对应班组（含数量信息）
+    var qtyInfo = dq > 0 ? ' 分配数量:' + dq : '';
+    var pidInfo = it.product_id ? ' 产品#' + it.product_id : '';
+    addNotif('team', null, 'new_dispatch', '新派单', '您有新的生产任务，订单#' + req.params.id + pidInfo + qtyInfo, req.params.id);
   });
 
-  // 检查是否所有产品都已分配（如果是多产品订单且拆分派单）
+  // 检查是否所有产品/数量都已分配完成
   var order = rowToObject(dbQuery("SELECT o.* FROM orders o WHERE o.id=" + req.params.id));
   if (order) {
     var orderItems = rowsToObjects(dbQuery("SELECT * FROM order_items WHERE order_id=" + req.params.id));
     if (orderItems.length > 0) {
-      var dispatchedPids = rowsToObjects(dbQuery("SELECT DISTINCT product_id FROM dispatches WHERE order_id=" + req.params.id)).map(function(d){return d.product_id;});
-      // 如果所有产品都分配了，或者分配了null（整单分配），标记为dispatched
-      if (dispatchedPids.indexOf(null) >= 0 || (orderItems.length > 0 && orderItems.every(function(oi){return dispatchedPids.indexOf(oi.product_id)>=0;}))) {
+      var allCovered = true;
+      orderItems.forEach(function(oi) {
+        var dispatchedQty = rowsToObjects(dbQuery("SELECT COALESCE(SUM(dispatch_qty),0) as total FROM dispatches WHERE order_id=" + req.params.id + " AND product_id=" + oi.product_id));
+        var dqTotal = dispatchedQty[0] ? (dispatchedQty[0].total || 0) : 0;
+        // 如果dispatch_qty全部为0（老数据或整单分配），则认为已覆盖
+        if (dqTotal === 0) {
+          var hasRecords = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM dispatches WHERE order_id=" + req.params.id + " AND product_id=" + oi.product_id));
+          if (hasRecords[0] && (hasRecords[0].c || 0) > 0) {
+            // 有派单记录但无数量=整单分配，视为已覆盖
+          } else {
+            allCovered = false;
+          }
+        } else if (dqTotal < oi.quantity) {
+          allCovered = false;
+        }
+      });
+      if (allCovered) {
         dbRun("UPDATE orders SET status='dispatched',updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
       }
     } else {
@@ -514,7 +601,7 @@ app.post('/api/orders/:id/inspection', requireRole('qc'), function(req, res) {
   var result = totalQ >= order.quantity ? 'pass' : 'fail';
 
   dbRun("INSERT INTO inspections (order_id,production_id,qualified_qty,unqualified_qty,inspector_id,result) VALUES (" + req.params.id + "," + (body.production_id||0) + "," + totalQ + "," + totalUQ + "," + req.session.user.id + ",'" + result + "')");
-  var inspId = getLastId();
+  var inspId = getLastId('inspections');
 
   items.forEach(function(it) {
     dbRun("INSERT INTO inspection_items (inspection_id,product_item_id,product_item_name,qualified_qty,unqualified_qty,defect_hair,defect_color_mix,defect_edge,defect_whitening,defect_bubble,defect_broken,defect_color_fail,defect_other) VALUES (" + inspId + "," + safeNum(it.product_item_id) + ",'" + safe(it.product_item_name||'') + "'," + safeNum(it.qualified_qty) + "," + safeNum(it.unqualified_qty) + "," + safeNum(it.defect_hair) + "," + safeNum(it.defect_color_mix) + "," + safeNum(it.defect_edge) + "," + safeNum(it.defect_whitening) + "," + safeNum(it.defect_bubble) + "," + safeNum(it.defect_broken) + "," + safeNum(it.defect_color_fail) + ",'" + safe(it.defect_other||'') + "')");
@@ -530,10 +617,19 @@ app.post('/api/orders/:id/inspection', requireRole('qc'), function(req, res) {
     var totalBox = Math.ceil(totalQ / itemsPerBox);
     dbRun("INSERT INTO finished_goods (product_id,box_qty,case_qty,production_date) VALUES (" + order.product_id + "," + totalBox + "," + Math.ceil(totalBox/10) + ",'" + new Date().toISOString().slice(0,10) + "')");
   } else {
-    dbRun("UPDATE orders SET status='qc_failed',updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
-    addNotif('clerk', null, 'rework_needed', '订单需补产', '合格数量不足，需补充生产', req.params.id);
-    var d = rowToObject(dbQuery("SELECT team_id FROM dispatches WHERE order_id=" + req.params.id));
-    if (d) addNotif('team', null, 'rework_needed', '补产通知', '订单需补产，请尽快安排', req.params.id);
+    // 返工计数与限制
+    var currentRework = (order.rework_count||0) + 1;
+    var maxRework = 3;
+    if (currentRework >= maxRework) {
+      db.exec("PRAGMA ignore_check_constraints = ON; UPDATE orders SET status='cancelled', rework_count=" + currentRework + ", cancel_reason='返工超过" + maxRework + "次自动取消', cancelled_by=" + req.session.user.id + ", cancelled_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
+      saveDatabase();
+      addNotif('clerk', null, 'rework_cancelled', '订单自动取消', '返工已达' + maxRework + '次上限，订单自动取消', req.params.id);
+    } else {
+      dbRun("UPDATE orders SET status='qc_failed', rework_count=" + currentRework + ", updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
+      addNotif('clerk', null, 'rework_needed', '订单需补产(第' + currentRework + '次)', '合格数量不足，需补充生产，剩余返工次数:' + (maxRework - currentRework), req.params.id);
+      var d = rowToObject(dbQuery("SELECT team_id FROM dispatches WHERE order_id=" + req.params.id));
+      if (d) addNotif('team', null, 'rework_needed', '补产通知(第' + currentRework + '次)', '订单需补产，请尽快安排', req.params.id);
+    }
   }
   addLog(req.session.user.id, 'inspection', '质检结果:' + result + ',合格' + totalQ + ',不合格' + totalUQ, req.params.id);
   res.json({ success: true, result: result });
@@ -652,7 +748,7 @@ app.post('/api/outbound-orders', requireRole('warehouse','admin'), function(req,
   var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM outbound_orders"))[0].c + 1;
   var obNo = 'CK' + String(cnt).padStart(6,'0');
   dbRun("INSERT INTO outbound_orders (outbound_no,customer_id,outbound_date,recipient,address,logistics,vehicle_plate,created_by) VALUES ('" + obNo + "'," + safeNum(b.customer_id) + ",'" + safe(b.outbound_date||'') + "','" + safe(b.recipient||'') + "','" + safe(b.address||'') + "','" + safe(b.logistics||'') + "','" + safe(b.vehicle_plate||'') + "'," + req.session.user.id + ")");
-  var oid = getLastId();
+  var oid = getLastId('outbound_orders');
   (b.items||[]).forEach(function(it) {
     dbRun("INSERT INTO outbound_items (outbound_id,finished_goods_id,product_name,box_qty,case_qty) VALUES (" + oid + "," + safeNum(it.finished_goods_id) + ",'" + safe(it.product_name||'') + "'," + safeNum(it.box_qty) + "," + safeNum(it.case_qty) + ")");
     var fg = rowToObject(dbQuery("SELECT * FROM finished_goods WHERE id=" + safeNum(it.finished_goods_id)));
@@ -758,34 +854,34 @@ app.put('/api/settings/:key', requireRole('admin'), function(req, res) {
 });
 
 // ===== 供应商管理 API =====
-app.get('/api/suppliers', requireRole('warehouse_admin','procurement','admin'), function(req, res) {
+app.get('/api/suppliers', requireRole('warehouse','procurement','admin'), function(req, res) {
   var suppliers = rowsToObjects(dbQuery("SELECT * FROM suppliers ORDER BY id"));
   suppliers.forEach(function(s) {
     s.certificates = rowsToObjects(dbQuery("SELECT * FROM supplier_certificates WHERE supplier_id=" + s.id + " ORDER BY cert_type,created_at DESC"));
   });
   res.json(suppliers);
 });
-app.post('/api/suppliers', requireRole('warehouse_admin','procurement','admin'), function(req, res) {
+app.post('/api/suppliers', requireRole('warehouse','procurement','admin'), function(req, res) {
   var b = req.body;
   dbRun("INSERT INTO suppliers (name,contact_person,phone,address,license_no,production_permit_no,food_permit_no) VALUES ('" + safe(b.name) + "','" + safe(b.contact_person||'') + "','" + safe(b.phone||'') + "','" + safe(b.address||'') + "','" + safe(b.license_no||'') + "','" + safe(b.production_permit_no||'') + "','" + safe(b.food_permit_no||'') + "')");
-  res.json({ success: true, id: getLastId() });
+  res.json({ success: true, id: getLastId('suppliers') });
 });
-app.put('/api/suppliers/:id', requireRole('warehouse_admin','procurement','admin'), function(req, res) {
+app.put('/api/suppliers/:id', requireRole('warehouse','procurement','admin'), function(req, res) {
   var b = req.body;
   dbRun("UPDATE suppliers SET name='" + safe(b.name) + "',contact_person='" + safe(b.contact_person||'') + "',phone='" + safe(b.phone||'') + "',address='" + safe(b.address||'') + "',license_no='" + safe(b.license_no||'') + "',production_permit_no='" + safe(b.production_permit_no||'') + "',food_permit_no='" + safe(b.food_permit_no||'') + "',status='" + safe(b.status||'active') + "',notes='" + safe(b.notes||'') + "',updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
   res.json({ success: true });
 });
 
-app.get('/api/suppliers/:id/certificates', requireRole('warehouse_admin','procurement','admin'), function(req, res) {
+app.get('/api/suppliers/:id/certificates', requireRole('warehouse','procurement','admin'), function(req, res) {
   res.json(rowsToObjects(dbQuery("SELECT * FROM supplier_certificates WHERE supplier_id=" + req.params.id + " ORDER BY cert_type,created_at DESC")));
 });
-app.post('/api/suppliers/:id/certificates', upload.single('file'), requireRole('warehouse_admin','procurement','admin'), function(req, res) {
+app.post('/api/suppliers/:id/certificates', upload.single('file'), requireRole('warehouse','procurement','admin'), function(req, res) {
   var b = req.body, ic = b.is_core ? 1 : 0;
   var url = req.file ? '/uploads/' + req.file.filename : '';
   dbRun("INSERT INTO supplier_certificates (supplier_id,cert_type,cert_number,issue_date,expiry_date,file_url,file_name,is_core) VALUES (" + req.params.id + ",'" + safe(b.cert_type) + "','" + safe(b.cert_number||'') + "','" + safe(b.issue_date||'') + "','" + safe(b.expiry_date||'') + "','" + url + "','" + safe(b.file_name||'') + "'," + ic + ")");
   res.json({ success: true });
 });
-app.delete('/api/supplier-certificates/:id', requireRole('warehouse_admin','procurement','admin'), function(req, res) {
+app.delete('/api/supplier-certificates/:id', requireRole('warehouse','procurement','admin'), function(req, res) {
   dbRun("UPDATE supplier_certificates SET status='archived' WHERE id=" + req.params.id);
   res.json({ success: true });
 });
@@ -812,7 +908,7 @@ app.get('/api/procurement-orders/:id', requireLogin, function(req, res) {
   res.json(order || { error: '采购单不存在' });
 });
 
-app.post('/api/procurement-orders', requireRole('warehouse','warehouse_admin','admin'), function(req, res) {
+app.post('/api/procurement-orders', requireRole('warehouse','admin'), function(req, res) {
   var b = req.body;
   var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM procurement_orders"))[0].c + 1;
   var orderNo = 'CG' + String(cnt).padStart(6, '0');
@@ -823,15 +919,15 @@ app.post('/api/procurement-orders', requireRole('warehouse','warehouse_admin','a
     ed = d.toISOString().slice(0, 10);
   }
   dbRun("INSERT INTO procurement_orders (order_no,material_type,material_id,material_name,material_spec,current_stock,min_alert,apply_qty,suggested_qty,priority,trigger_reason,expected_date,applicant_id,notes) VALUES ('" + orderNo + "','" + safe(b.material_type) + "'," + safeNum(b.material_id) + ",'" + safe(b.material_name) + "','" + safe(b.material_spec||'') + "'," + safeNum(b.current_stock) + "," + safeNum(b.min_alert) + "," + safeNum(b.apply_qty) + "," + safeNum(b.suggested_qty) + ",'" + safe(b.priority||'normal') + "','" + safe(b.trigger_reason||'') + "','" + ed + "'," + req.session.user.id + ",'" + safe(b.notes||'') + "')");
-  var oid = getLastId();
+  var oid = getLastId('procurement_orders');
   if (b.priority === 'urgent') {
-    addNotif('warehouse_admin', null, 'procurement_urgent', '紧急采购: ' + b.material_name, '采购单' + orderNo + '已自动生成并审批，关联订单可能受影响');
+    addNotif('warehouse', null, 'procurement_urgent', '紧急采购: ' + b.material_name, '采购单' + orderNo + '已自动生成并审批，关联订单可能受影响');
     addNotif('clerk', null, 'procurement_urgent', '紧急采购: ' + b.material_name, '采购单' + orderNo + '已生成');
   }
   res.json({ success: true, id: oid, order_no: orderNo });
 });
 
-app.put('/api/procurement-orders/:id/status', requireRole('warehouse_admin','admin'), function(req, res) {
+app.put('/api/procurement-orders/:id/status', requireRole('warehouse','admin'), function(req, res) {
   var order = rowToObject(dbQuery("SELECT * FROM procurement_orders WHERE id=" + req.params.id));
   var uid = req.session.user.id, role = req.session.user.role;
   var ns = req.body.status, reason = safe(req.body.reason||'');
@@ -855,7 +951,7 @@ app.put('/api/procurement-orders/:id/status', requireRole('warehouse_admin','adm
     var cnt2 = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM procurement_orders"))[0].c + 1;
     var newNo = 'CG' + String(cnt2).padStart(6, '0');
     dbRun("INSERT INTO procurement_orders (order_no,material_type,material_id,material_name,material_spec,current_stock,min_alert,apply_qty,priority,trigger_reason,expected_date,applicant_id,original_proc_order_id,notes) VALUES ('" + newNo + "','" + order.material_type + "'," + order.material_id + ",'" + safe(order.material_name) + "','" + safe(order.material_spec||'') + "'," + order.current_stock + "," + order.min_alert + "," + newQty + ",'" + order.priority + "','原供应商拒单，重新选供应商','" + (order.expected_date||'') + "'," + req.session.user.id + "," + order.id + ",'原采购单" + order.order_no + "供应商拒单')");
-    addNotif('warehouse_admin', null, order.priority === 'urgent' ? 'procurement_urgent' : 'procurement_supplier_reject', '供应商拒单: ' + order.material_name, '供应商' + (order.supplier_name||'') + '拒单，已创建新采购单' + newNo);
+    addNotif('warehouse', null, order.priority === 'urgent' ? 'procurement_urgent' : 'procurement_supplier_reject', '供应商拒单: ' + order.material_name, '供应商' + (order.supplier_name||'') + '拒单，已创建新采购单' + newNo);
   } else if (ns === 'cancelled') {
     dbRun("UPDATE procurement_orders SET status='cancelled',notes=COALESCE(notes||', ','')||'取消原因: " + reason + "' WHERE id=" + req.params.id);
   } else {
@@ -866,7 +962,7 @@ app.put('/api/procurement-orders/:id/status', requireRole('warehouse_admin','adm
 });
 
 // 到货确认
-app.post('/api/procurement-orders/:id/arrive', requireRole('warehouse','warehouse_admin','admin'), function(req, res) {
+app.post('/api/procurement-orders/:id/arrive', requireRole('warehouse','admin'), function(req, res) {
   var b = req.body, uid = req.session.user.id;
   var order = rowToObject(dbQuery("SELECT * FROM procurement_orders WHERE id=" + req.params.id));
   if (!order) return res.json({ success: false, msg: '采购单不存在' });
@@ -884,11 +980,11 @@ app.post('/api/procurement-orders/:id/arrive', requireRole('warehouse','warehous
     var cnt3 = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM procurement_orders"))[0].c + 1;
     var dn = 'CG' + String(cnt3).padStart(6, '0');
     dbRun("INSERT INTO procurement_orders (order_no,material_type,material_id,material_name,material_spec,current_stock,min_alert,apply_qty,priority,trigger_reason,expected_date,applicant_id,original_proc_order_id,notes) VALUES ('" + dn + "','" + order.material_type + "'," + order.material_id + ",'" + safe(order.material_name) + "','" + safe(order.material_spec||'') + "'," + (order.current_stock + actualQty) + "," + order.min_alert + "," + diff + ",'" + order.priority + "','原采购单" + order.order_no + "部分到货差异补单','" + (order.expected_date||'') + "'," + uid + "," + order.id + ",'差异原因: " + safe(b.diff_notes||'') + "')");
-    addNotif('warehouse_admin', null, 'procurement_diff', '到货差异: ' + order.material_name, '采购单' + order.order_no + '部分到货' + actualQty + '/' + order.apply_qty);
+    addNotif('warehouse', null, 'procurement_diff', '到货差异: ' + order.material_name, '采购单' + order.order_no + '部分到货' + actualQty + '/' + order.apply_qty);
   } else if (conclusion === 'fail') {
     var failReason = b.inspection_fail_reason || '';
     dbRun("UPDATE procurement_orders SET status='inspection_fail',inspection_fail_reason='" + safe(failReason) + "' WHERE id=" + req.params.id);
-    addNotif('warehouse_admin', null, 'procurement_inspect_fail', '自检不合格: ' + order.material_name, '采购单' + order.order_no + '自检不合格。原因：' + failReason);
+    addNotif('warehouse', null, 'procurement_inspect_fail', '自检不合格: ' + order.material_name, '采购单' + order.order_no + '自检不合格。原因：' + failReason);
     if (order.priority === 'urgent' && order.related_order_id) {
       addNotif('supervisor', null, 'procurement_inspect_fail', '紧急物料自检不合格影响生产', '物料' + order.material_name + '自检不合格，关联生产订单可能受影响');
     }
@@ -903,7 +999,7 @@ app.post('/api/procurement-orders/:id/arrive', requireRole('warehouse','warehous
 });
 
 // 采购统计
-app.get('/api/procurement-stats', requireRole('warehouse_admin','procurement','admin','console'), function(req, res) {
+app.get('/api/procurement-stats', requireRole('warehouse','procurement','admin','console'), function(req, res) {
   var stats = {};
   ['pending','approved','ordered','arrived','partial_arrived','supplier_reject','inspection_fail','cancelled'].forEach(function(s) {
     var r = rowToObject(dbQuery("SELECT COUNT(*) as c FROM procurement_orders WHERE status='" + s + "'"));
@@ -917,7 +1013,7 @@ app.get('/api/procurement-stats', requireRole('warehouse_admin','procurement','a
 });
 
 // 库存低预警自动检查
-app.post('/api/inventory/check-low-stock', requireRole('warehouse_admin','admin'), function(req, res) {
+app.post('/api/inventory/check-low-stock', requireRole('warehouse','admin'), function(req, res) {
   var created = [];
   [{table:'raw_materials',type:'raw'},{table:'inner_pack_materials',type:'inner'},{table:'outer_pack_materials',type:'outer'}].forEach(function(mt) {
     var mats = rowsToObjects(dbQuery("SELECT * FROM " + mt.table + " WHERE stock_qty <= min_alert AND min_alert > 0"));
@@ -935,10 +1031,10 @@ app.post('/api/inventory/check-low-stock', requireRole('warehouse_admin','admin'
       var on = 'CG' + String(cnt4).padStart(6, '0');
       dbRun("INSERT INTO procurement_orders (order_no,material_type,material_id,material_name,material_spec,current_stock,min_alert,apply_qty,suggested_qty,priority,trigger_reason,expected_date,status,applicant_id) VALUES ('" + on + "','" + mt.type + "'," + m.id + ",'" + safe(m.name) + "','" + safe(m.spec||'') + "'," + (m.stock_qty||0) + "," + (m.min_alert||0) + "," + suggestedQty + "," + suggestedQty + ",'" + priority + "','" + safe(reason) + "','" + ed + "','" + (priority === 'urgent' ? 'approved' : 'pending') + "'," + req.session.user.id + ")");
       if (priority === 'urgent') {
-        addNotif('warehouse_admin', null, 'procurement_urgent', '紧急采购: ' + m.name, '库存' + m.stock_qty + '，预警' + m.min_alert + '，已自动生成并审批采购单' + on);
+        addNotif('warehouse', null, 'procurement_urgent', '紧急采购: ' + m.name, '库存' + m.stock_qty + '，预警' + m.min_alert + '，已自动生成并审批采购单' + on);
         addNotif('clerk', null, 'procurement_urgent', '紧急采购: ' + m.name, '自动生成采购单' + on);
       } else {
-        addNotif('warehouse_admin', null, 'procurement_normal', '常规采购: ' + m.name, '库存不足，已生成采购单' + on);
+        addNotif('warehouse', null, 'procurement_normal', '常规采购: ' + m.name, '库存不足，已生成采购单' + on);
       }
       created.push({ order_no: on, material: m.name, priority: priority });
     });
@@ -960,7 +1056,7 @@ app.get('/api/preparations', requireRole('preparation','supervisor','admin'), fu
 app.post('/api/preparations', requireRole('preparation','admin'), function(req, res) {
   var b = req.body;
   dbRun("INSERT INTO preparations (order_id,preparer_id,prep_date,color_target,color_result,notes) VALUES (" + safeNum(b.order_id) + "," + req.session.user.id + ",'" + safe(b.prep_date||'') + "','" + safe(b.color_target||'') + "','" + safe(b.color_result||'') + "','" + safe(b.notes||'') + "')");
-  var pid = getLastId();
+  var pid = getLastId('preparations');
   (b.items||[]).forEach(function(it) {
     dbRun("INSERT INTO preparation_items (prep_id,material_type,material_id,material_name,usage_grams,notes) VALUES (" + pid + ",'" + safe(it.material_type||'other') + "'," + safeNum(it.material_id) + ",'" + safe(it.material_name||'') + "'," + parseFloat(it.usage_grams||0) + ",'" + safe(it.notes||'') + "')");
     // 库存扣减
@@ -1005,7 +1101,7 @@ app.post('/api/material-requisitions', requireRole('supervisor','admin','qc','pa
 });
 
 // ===== 统一台账 API =====
-app.get('/api/inventory-ledger', requireRole('warehouse','admin','warehouse_admin'), function(req, res) {
+app.get('/api/inventory-ledger', requireRole('warehouse','admin'), function(req, res) {
   var sql = "SELECT l.* FROM inventory_ledger l WHERE 1=1";
   if (req.query.type) sql += " AND l.type='" + safe(req.query.type) + "'";
   if (req.query.warehouse_type) sql += " AND l.warehouse_type='" + safe(req.query.warehouse_type) + "'";
@@ -1020,14 +1116,14 @@ app.get('/api/inventory-ledger', requireRole('warehouse','admin','warehouse_admi
 });
 
 // ===== 入库记录 API =====
-app.get('/api/inbound-records', requireRole('warehouse','admin','warehouse_admin'), function(req, res) {
+app.get('/api/inbound-records', requireRole('warehouse','admin'), function(req, res) {
   var sql = "SELECT ir.*,s.name as supplier_name FROM inbound_records ir LEFT JOIN suppliers s ON ir.supplier_id=s.id WHERE 1=1";
   if (req.query.warehouse_type) sql += " AND ir.warehouse_type='" + safe(req.query.warehouse_type) + "'";
   sql += " ORDER BY ir.created_at DESC LIMIT 100";
   res.json(rowsToObjects(dbQuery(sql)));
 });
 
-app.post('/api/inbound-records', requireRole('warehouse','admin','warehouse_admin'), function(req, res) {
+app.post('/api/inbound-records', requireRole('warehouse','admin'), function(req, res) {
   var b = req.body;
   var wt = safe(b.warehouse_type);
   var mid = safeNum(b.material_id), qty = safeNum(b.quantity);
@@ -1073,7 +1169,7 @@ app.post('/api/outer-pack-materials/issue', requireRole('warehouse','admin'), fu
 });
 
 // ===== 辅料库 API =====
-app.get('/api/auxiliary-materials', requireRole('warehouse','admin','warehouse_admin','supervisor'), function(req, res) {
+app.get('/api/auxiliary-materials', requireRole('warehouse','admin','warehouse','supervisor'), function(req, res) {
   res.json(rowsToObjects(dbQuery("SELECT * FROM auxiliary_materials ORDER BY id")));
 });
 
@@ -1107,12 +1203,12 @@ app.post('/api/auxiliary-materials/issue', requireRole('warehouse','admin'), fun
 });
 
 // ===== 采购到货确认（仓库端） =====
-app.get('/api/procurement-orders/pending-receiving', requireRole('warehouse','warehouse_admin','admin'), function(req, res) {
+app.get('/api/procurement-orders/pending-receiving', requireRole('warehouse','admin'), function(req, res) {
   var orders = rowsToObjects(dbQuery("SELECT po.*,s.name as supplier_name FROM procurement_orders po LEFT JOIN suppliers s ON po.supplier_id=s.id WHERE po.status IN ('ordered','partial_arrived') ORDER BY po.priority='urgent' DESC, po.created_at ASC"));
   res.json(orders);
 });
 
-app.post('/api/procurement-orders/:id/confirm-receiving', requireRole('warehouse','warehouse_admin','admin'), function(req, res) {
+app.post('/api/procurement-orders/:id/confirm-receiving', requireRole('warehouse','admin'), function(req, res) {
   var b = req.body, uid = req.session.user.id;
   var order = rowToObject(dbQuery("SELECT * FROM procurement_orders WHERE id=" + req.params.id));
   if (!order) return res.json({ success: false, msg: '采购单不存在' });
@@ -1152,14 +1248,14 @@ app.post('/api/procurement-orders/:id/confirm-receiving', requireRole('warehouse
   // 操作日志
   dbRun("INSERT INTO procurement_operation_logs (proc_order_id,operator_id,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + uid + ",'" + safe(req.session.user.role) + "','arrive','到货确认 数量:" + actualQty + " 结论:" + conclusion + "','" + safe(order.status) + "','" + newStatus + "')");
 
-  addNotif('warehouse_admin', null, 'procurement_arrived', '采购到货: ' + order.material_name, '采购单' + order.order_no + '已到货，实收' + actualQty + '，入库单号:' + inNo, req.params.id);
+  addNotif('warehouse', null, 'procurement_arrived', '采购到货: ' + order.material_name, '采购单' + order.order_no + '已到货，实收' + actualQty + '，入库单号:' + inNo, req.params.id);
   res.json({ success: true, status: newStatus, inbound_no: inNo });
 });
 
 // ===== 采购申请 API（全岗位覆盖） =====
 
 // 提交采购申请
-app.post('/api/purchase-requests', requireRole('clerk','supervisor','team','qc','packaging','warehouse','warehouse_admin','procurement','admin'), upload.single('image'), function(req, res) {
+app.post('/api/purchase-requests', requireRole('clerk','supervisor','team','qc','packaging','warehouse','procurement','admin'), upload.single('image'), function(req, res) {
   var b = req.body;
   if (!b.product_name || !b.quantity) return res.json({ success: false, msg: '请填写产品名称和数量' });
   var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM purchase_requests"))[0].c + 1;
@@ -1179,7 +1275,7 @@ app.post('/api/purchase-requests', requireRole('clerk','supervisor','team','qc',
     addNotif('procurement', null, 'purchase_request', '紧急采购申请: '+safe(b.product_name), '申请单号:'+rno+' 产品:'+safe(b.product_name)+' 数量:'+safeNum(b.quantity)+'（自动审批，请立即处理）', reqId);
   } else if (priority === 'normal') {
     addNotif('admin', null, 'purchase_request', '常规采购审批: '+safe(b.product_name), '申请单号:'+rno+' 提交人:'+safe(req.session.user.real_name||'')+' 产品:'+safe(b.product_name)+' 数量:'+safeNum(b.quantity), reqId);
-    addNotif('warehouse_admin', null, 'purchase_request', '常规采购审批: '+safe(b.product_name), '申请单号:'+rno+' 提交人:'+safe(req.session.user.real_name||'')+' 产品:'+safe(b.product_name)+' 数量:'+safeNum(b.quantity), reqId);
+    addNotif('warehouse', null, 'purchase_request', '常规采购审批: '+safe(b.product_name), '申请单号:'+rno+' 提交人:'+safe(req.session.user.real_name||'')+' 产品:'+safe(b.product_name)+' 数量:'+safeNum(b.quantity), reqId);
   } else {
     addNotif('procurement', null, 'purchase_request', '备用采购申请: '+safe(b.product_name), '申请单号:'+rno+'（排队处理中）', reqId);
   }
@@ -1188,7 +1284,7 @@ app.post('/api/purchase-requests', requireRole('clerk','supervisor','team','qc',
 });
 
 // 获取采购申请列表
-app.get('/api/purchase-requests', requireRole('admin','procurement','warehouse_admin'), function(req, res) {
+app.get('/api/purchase-requests', requireRole('admin','procurement','warehouse'), function(req, res) {
   var sql = "SELECT pr.* FROM purchase_requests pr WHERE 1=1";
   if (req.query.status) sql += " AND pr.status='" + safe(req.query.status) + "'";
   if (req.query.priority) sql += " AND pr.priority='" + safe(req.query.priority) + "'";
@@ -1210,7 +1306,7 @@ app.get('/api/purchase-requests/mine', requireLogin, function(req, res) {
 });
 
 // 审批采购申请
-app.put('/api/purchase-requests/:id/approve', requireRole('admin','warehouse_admin'), function(req, res) {
+app.put('/api/purchase-requests/:id/approve', requireRole('admin','warehouse'), function(req, res) {
   var r = rowToObject(dbQuery("SELECT * FROM purchase_requests WHERE id=" + req.params.id));
   if (!r) return res.json({ success: false, msg: '申请不存在' });
   if (r.status !== 'pending') return res.json({ success: false, msg: '当前状态不可审批' });
@@ -1222,7 +1318,7 @@ app.put('/api/purchase-requests/:id/approve', requireRole('admin','warehouse_adm
 });
 
 // 驳回采购申请
-app.put('/api/purchase-requests/:id/reject', requireRole('admin','warehouse_admin','procurement'), function(req, res) {
+app.put('/api/purchase-requests/:id/reject', requireRole('admin','warehouse','procurement'), function(req, res) {
   var b = req.body, reason = b.reason || '未填写原因';
   var r = rowToObject(dbQuery("SELECT * FROM purchase_requests WHERE id=" + req.params.id));
   if (!r) return res.json({ success: false, msg: '申请不存在' });
@@ -1302,7 +1398,7 @@ app.post('/api/procurement-orders/:id/payment', requireRole('procurement','admin
 });
 
 // 获取付款记录
-app.get('/api/procurement-orders/:id/payments', requireRole('procurement','admin','warehouse','warehouse_admin','clerk','supervisor'), function(req, res) {
+app.get('/api/procurement-orders/:id/payments', requireRole('procurement','admin','warehouse','clerk','supervisor'), function(req, res) {
   res.json(rowsToObjects(dbQuery("SELECT * FROM purchase_payments WHERE proc_order_id=" + req.params.id + " ORDER BY created_at DESC")));
 });
 
@@ -1322,7 +1418,7 @@ app.post('/api/procurement-orders/:id/supplier-reject', requireRole('procurement
 });
 
 // 获取采购单详细
-app.get('/api/procurement-orders/:id/detail', requireRole('procurement','admin','warehouse','warehouse_admin'), function(req, res) {
+app.get('/api/procurement-orders/:id/detail', requireRole('procurement','admin','warehouse'), function(req, res) {
   var order = rowToObject(dbQuery("SELECT po.*,s.name as supplier_name,s.contact_person,s.phone FROM procurement_orders po LEFT JOIN suppliers s ON po.supplier_id=s.id WHERE po.id=" + req.params.id));
   if (!order) return res.json({ error: '不存在' });
   order.logs = rowsToObjects(dbQuery("SELECT * FROM procurement_operation_logs WHERE proc_order_id=" + req.params.id + " ORDER BY created_at"));
@@ -1336,7 +1432,7 @@ app.get('/api/procurement-orders/:id/detail', requireRole('procurement','admin',
 });
 
 // ===== 到货差异记录 =====
-app.post('/api/procurement-orders/:id/discrepancy', requireRole('warehouse','warehouse_admin','admin'), function(req, res) {
+app.post('/api/procurement-orders/:id/discrepancy', requireRole('warehouse','admin'), function(req, res) {
   var b = req.body;
   var order = rowToObject(dbQuery("SELECT * FROM procurement_orders WHERE id=" + req.params.id));
   if (!order) return res.json({ success: false, msg: '采购单不存在' });
@@ -1345,6 +1441,243 @@ app.post('/api/procurement-orders/:id/discrepancy', requireRole('warehouse','war
   dbRun("INSERT INTO procurement_operation_logs (proc_order_id,operator_id,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + req.session.user.id + ",'warehouse','discrepancy','到货差异: 预期'+expected+'实收'+actual+' 差异'+diff,'" + safe(order.status) + "','" + safe(order.status) + "')");
   addNotif('procurement', null, 'procurement_discrepancy', '到货数量差异', '采购单'+safe(order.order_no)+' 预期'+expected+'实收'+actual+' 差异'+diff+' 原因:'+safe(b.diff_reason||''), req.params.id);
   res.json({ success: true });
+});
+
+// ===== Batch 3: 采购/库存增强 =====
+
+// 供应商自动匹配（基于物料类型+评分排序）
+app.get('/api/alternative-suppliers', requireRole('procurement','admin','warehouse'), function(req, res) {
+  var mt = req.query.material_type || '';
+  var mid = safeNum(req.query.material_id);
+  var suppliers = rowsToObjects(dbQuery(
+    "SELECT s.*, " +
+    "CASE WHEN s.cooperation_score >= 90 THEN 5 WHEN s.cooperation_score >= 70 THEN 3 ELSE 1 END as score_weight " +
+    "FROM suppliers s WHERE s.status='active' ORDER BY s.cooperation_score DESC"
+  ));
+  // 按评分排序，分数越高的排前面
+  suppliers.sort(function(a, b) { return (b.cooperation_score||0) - (a.cooperation_score||0); });
+  res.json({ success: true, suppliers: suppliers });
+});
+
+// 24小时紧急采购监控
+app.get('/api/urgent-monitor', requireRole('procurement','admin','warehouse'), function(req, res) {
+  var since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 19);
+  var urgents = rowsToObjects(dbQuery(
+    "SELECT po.*, s.name as supplier_name FROM procurement_orders po " +
+    "LEFT JOIN suppliers s ON po.supplier_id=s.id " +
+    "WHERE po.priority='urgent' AND po.status NOT IN ('arrived','cancelled') " +
+    "ORDER BY po.created_at DESC"
+  ));
+  var alerts = rowsToObjects(dbQuery(
+    "SELECT pa.*, po.order_no, po.material_name FROM procurement_alerts pa " +
+    "JOIN procurement_orders po ON pa.proc_order_id=po.id " +
+    "WHERE pa.is_read=0 ORDER BY pa.created_at DESC"
+  ));
+  res.json({ success: true, urgents: urgents, alerts: alerts, count: urgents.length, alertCount: alerts.length });
+});
+
+// 季节库存阈值设置
+app.put('/api/settings/season', requireRole('admin'), function(req, res) {
+  var season = req.body.season || 'normal'; // peak(旺季1.5x) / normal(1.0x) / low(淡季0.7x)
+  var factor = season === 'peak' ? 1.5 : season === 'low' ? 0.7 : 1.0;
+  dbRun("UPDATE raw_materials SET season_factor=" + factor);
+  dbRun("INSERT OR REPLACE INTO settings (key,value) VALUES ('current_season','" + safe(season) + "')");
+  dbRun("INSERT OR REPLACE INTO settings (key,value) VALUES ('season_factor','" + factor + "')");
+  res.json({ success: true, season: season, factor: factor });
+});
+
+// 物料用量分析（标准 vs 实际）
+app.get('/api/material-usage-stats', requireRole('warehouse','admin','supervisor'), function(req, res) {
+  var startDate = req.query.start_date || '2024-01-01';
+  var endDate = req.query.end_date || '2030-12-31';
+  var stats = rowsToObjects(dbQuery(
+    "SELECT rm.name, rm.spec, rm.standard_usage as standard, rm.season_factor, " +
+    "COUNT(rmi.id) as issue_count, COALESCE(SUM(rmi.quantity),0) as total_used, " +
+    "COALESCE(AVG(rmi.quantity),0) as avg_per_issue " +
+    "FROM raw_materials rm LEFT JOIN raw_material_issues rmi ON rm.id=rmi.material_id " +
+    "WHERE rmi.issued_at IS NULL OR (rmi.issued_at >= '" + startDate + "' AND rmi.issued_at <= '" + endDate + "') " +
+    "GROUP BY rm.id ORDER BY total_used DESC"
+  ));
+  res.json({ success: true, stats: stats, period: { start: startDate, end: endDate } });
+});
+
+// 外包材自动计算
+app.get('/api/outer-pack-calculate', requireRole('packaging','warehouse','admin'), function(req, res) {
+  var orderId = safeNum(req.query.order_id);
+  if (!orderId) return res.json({ success: false, msg: '请指定订单ID' });
+  
+  var order = rowToObject(dbQuery("SELECT o.*, p.items_per_box FROM orders o JOIN products p ON o.product_id=p.id WHERE o.id=" + orderId));
+  if (!order) return res.json({ success: false, msg: '订单不存在' });
+  
+  var itemsPerBox = order.items_per_box || 1;
+  var totalBoxes = Math.ceil(order.quantity / itemsPerBox);
+  var casesPerLayer = 10; // 每层10盒
+  var totalCases = Math.ceil(totalBoxes / casesPerLayer);
+  var casesPerOuterBox = 5; // 每个外箱装5层
+  var totalOuterBoxes = Math.ceil(totalCases / casesPerOuterBox);
+  
+  // 匹配外包材
+  var boxes = rowsToObjects(dbQuery("SELECT * FROM outer_pack_materials WHERE box_type IN ('飞机盒','礼盒') AND stock_qty > 0 ORDER BY items_per_box"));
+  var outerBoxes = rowsToObjects(dbQuery("SELECT * FROM outer_pack_materials WHERE box_type='外箱' AND stock_qty > 0"));
+  
+  res.json({
+    success: true,
+    quantity: order.quantity,
+    items_per_box: itemsPerBox,
+    total_boxes: totalBoxes,
+    total_cases: totalCases,
+    total_outer_boxes: totalOuterBoxes,
+    available_boxes: boxes,
+    available_outer_boxes: outerBoxes,
+    box_warning: boxes.length === 0 ? '飞机盒/礼盒库存不足' : (boxes[0].stock_qty < totalBoxes ? '库存可能不足' : '库存充足'),
+    outer_box_warning: outerBoxes.length === 0 ? '外箱库存不足' : (outerBoxes[0].stock_qty < totalOuterBoxes ? '库存可能不足' : '库存充足')
+  });
+});
+
+// ===== Batch 4: 系统增强 =====
+
+// 通知批量已读
+app.put('/api/notifications/read-all', requireLogin, function(req, res) {
+  var uid = req.session.user.id;
+  var role = req.session.user.role;
+  dbRun("UPDATE notifications SET is_read=1 WHERE (user_id=" + uid + " OR role='" + role + "') AND is_read=0");
+  res.json({ success: true });
+});
+
+// 审计日志
+app.get('/api/audit-logs', requireRole('admin'), function(req, res) {
+  var limit = safeNum(req.query.limit, 100);
+  var offset = safeNum(req.query.offset, 0);
+  var logs = rowsToObjects(dbQuery(
+    "SELECT al.*, u.username FROM audit_logs al LEFT JOIN users u ON al.user_id=u.id " +
+    "ORDER BY al.created_at DESC LIMIT " + limit + " OFFSET " + offset
+  ));
+  res.json({ success: true, logs: logs });
+});
+
+// 记录审计日志辅助函数
+function addAuditLog(uid, uname, role, action, targetType, targetId, detail) {
+  try {
+    db.run("INSERT INTO audit_logs (user_id,username,role,action,target_type,target_id,detail,created_at) VALUES (" + uid + ",'" + safe(uname) + "','" + safe(role) + "','" + safe(action) + "','" + safe(targetType||'') + "'," + safeNum(targetId,0) + ",'" + safe(detail||'') + "',CURRENT_TIMESTAMP)");
+  } catch(e) {}
+}
+
+// 数据归档
+app.post('/api/admin/archive', requireRole('admin'), function(req, res) {
+  var b = req.body;
+  var archiveType = b.type || 'orders';
+  var beforeDate = b.before_date || new Date(Date.now() - 365*24*60*60*1000).toISOString().slice(0,10);
+  
+  var count = 0;
+  if (archiveType === 'orders') {
+    var r = dbQuery("SELECT COUNT(*) as c FROM orders WHERE status IN ('completed','cancelled') AND updated_at < '" + beforeDate + "'");
+    count = r[0] ? r[0].values[0][0] : 0;
+    // 实际归档需要导出CSV，这里先记录数量
+    dbRun("INSERT INTO archive_records (archive_type,data_summary,row_count,archived_by) VALUES ('orders','已完成/已取消订单(" + beforeDate + "之前)'," + count + "," + req.session.user.id + ")");
+  } else if (archiveType === 'notifications') {
+    var r = dbQuery("SELECT COUNT(*) as c FROM notifications WHERE is_read=1 AND created_at < '" + beforeDate + "'");
+    count = r[0] ? r[0].values[0][0] : 0;
+    dbRun("INSERT INTO archive_records (archive_type,data_summary,row_count,archived_by) VALUES ('notifications','已读通知(" + beforeDate + "之前)'," + count + "," + req.session.user.id + ")");
+    dbRun("DELETE FROM notifications WHERE is_read=1 AND created_at < '" + beforeDate + "'");
+  }
+  
+  res.json({ success: true, archived_count: count, archive_type: archiveType });
+});
+
+// 证照到期检查
+app.get('/api/supplier-certificates/expiry-check', requireRole('warehouse','procurement','admin'), function(req, res) {
+  var warnDays = safeNum(req.query.warn_days, 30);
+  var today = new Date().toISOString().slice(0, 10);
+  var warnDate = new Date(Date.now() + warnDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  
+  var expiring = rowsToObjects(dbQuery(
+    "SELECT sc.*, s.name as supplier_name FROM supplier_certificates sc " +
+    "JOIN suppliers s ON sc.supplier_id=s.id " +
+    "WHERE sc.expiry_date >= '" + today + "' AND sc.expiry_date <= '" + warnDate + "' AND sc.status!='expired' " +
+    "ORDER BY sc.expiry_date ASC"
+  ));
+  
+  var expired = rowsToObjects(dbQuery(
+    "SELECT sc.*, s.name as supplier_name FROM supplier_certificates sc " +
+    "JOIN suppliers s ON sc.supplier_id=s.id " +
+    "WHERE sc.expiry_date < '" + today + "' AND sc.status!='expired' "
+  ));
+  
+  // 自动更新过期状态
+  expired.forEach(function(e) {
+    dbRun("UPDATE supplier_certificates SET status='expired' WHERE id=" + e.id);
+  });
+  
+  res.json({ success: true, expiring: expiring, expired: expired, warn_days: warnDays });
+});
+
+// 防重复提交缓存
+var _lastSubmit = {};
+app.use(function(req, res, next) {
+  if (req.method === 'POST' || req.method === 'PUT') {
+    var key = req.session.user ? req.session.user.id + ':' + req.path : 'anon:' + req.path;
+    var now = Date.now();
+    if (_lastSubmit[key] && now - _lastSubmit[key] < 3000) {
+      return res.json({ success: false, msg: '请勿频繁操作，3秒后再试' });
+    }
+    _lastSubmit[key] = now;
+  }
+  next();
+});
+
+// ===== Batch 5: 增强统计 =====
+
+app.get('/api/stats/enhanced', requireRole('admin','console','supervisor'), function(req, res) {
+  var now = new Date();
+  var thisMonth = now.toISOString().slice(0, 7);
+  
+  // 逾期率
+  var totalOrders = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM orders"))[0].c || 1;
+  var overdueOrders = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM orders WHERE deadline < '" + now.toISOString().slice(0,10) + "' AND status NOT IN ('completed','cancelled')"))[0].c || 0;
+  var overdueRate = (overdueOrders / totalOrders * 100).toFixed(1);
+  
+  // 返工率
+  var totalInspections = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM inspections"))[0].c || 1;
+  var reworkOrders = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM orders WHERE rework_count > 0"))[0].c || 0;
+  var reworkRate = (reworkOrders / totalInspections * 100).toFixed(1);
+  
+  // 每日趋势（近7天）
+  var trends = [];
+  for (var i = 6; i >= 0; i--) {
+    var d = new Date(now - i * 86400000);
+    var ds = d.toISOString().slice(0, 10);
+    var completed = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM orders WHERE status='completed' AND date(updated_at)='" + ds + "'"))[0].c || 0;
+    var created = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM orders WHERE date(created_at)='" + ds + "'"))[0].c || 0;
+    trends.push({ date: ds, completed: completed, created: created });
+  }
+  
+  // 班组产能
+  var teams = rowsToObjects(dbQuery("SELECT t.id, t.name FROM teams t"));
+  teams.forEach(function(t) {
+    t.completed = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM dispatches d JOIN orders o ON d.order_id=o.id WHERE d.team_id=" + t.id + " AND o.status='completed'"))[0].c || 0;
+    t.in_progress = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM dispatches d JOIN orders o ON d.order_id=o.id WHERE d.team_id=" + t.id + " AND o.status NOT IN ('completed','cancelled','pending')"))[0].c || 0;
+  });
+  
+  // 库存预警
+  var lowStockRaw = rowsToObjects(dbQuery("SELECT * FROM raw_materials WHERE stock_qty <= min_alert AND min_alert > 0"));
+  var lowStockInner = rowsToObjects(dbQuery("SELECT * FROM inner_pack_materials WHERE stock_qty <= min_alert AND min_alert > 0"));
+  var lowStockOuter = rowsToObjects(dbQuery("SELECT * FROM outer_pack_materials WHERE stock_qty <= min_alert AND min_alert > 0"));
+  
+  res.json({
+    success: true,
+    overdue_rate: overdueRate,
+    rework_rate: reworkRate,
+    overdue_count: overdueOrders,
+    rework_count: reworkOrders,
+    trends: trends,
+    teams: teams,
+    low_stock: {
+      raw: lowStockRaw.length,
+      inner: lowStockInner.length,
+      outer: lowStockOuter.length,
+      items: [].concat(lowStockRaw, lowStockInner, lowStockOuter)
+    }
+  });
 });
 
 // SPA 回退
@@ -1365,10 +1698,10 @@ async function start() {
       }
     });
   });
-  console.log('账号: admin/123456, clerk1/123456, supervisor1/123456');
-  console.log('      team1/123456, team2/123456, team3/123456');
-  console.log('      qc1/123456, pack1/123456, console1/123456');
-  console.log('      finance1/123456, warehouse1/123456');
+  console.log('账号: admin/123456, wenyuan/123456, shengchang/123456');
+  console.log('      shengchanA-F/123456 (6个班组)');
+  console.log('      zhijian/123456, dabao/123456, zongkong/123456');
+  console.log('      caiwu/123456, cangguan/123456, caigou/123456, peiliao/123456');
   app.listen(PORT, '0.0.0.0');
 }
 

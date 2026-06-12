@@ -287,6 +287,7 @@ textarea.form-input {
 .status-rework { background: #FFF7E6; color: #FA8C16; }
 .status-packaging { background: #E6F7FF; color: #1890FF; }
 .status-completed { background: #F6FFED; color: #389E0D; }
+.status-cancelled { background: #FFF2F0; color: #CF1322; }
 
 /* ===== 订单列表项 ===== */
 .order-item {
@@ -511,6 +512,11 @@ textarea.form-input {
   padding: 14px;
   text-align: center;
   box-shadow: var(--shadow);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.stat-card:active {
+  transform: scale(0.96);
+  box-shadow: 0 1px 4px rgba(139,69,19,0.15);
 }
 
 .stat-card .stat-value {
@@ -792,4 +798,50 @@ textarea.form-input {
   .tab-bar, .page-header { display: none; }
   .app-container { padding-bottom: 0; }
   body { max-width: none; }
+}
+
+/* ===== 悬浮按钮 FAB ===== */
+.fab-btn {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(139,69,19,0.3);
+  cursor: pointer;
+  z-index: 999;
+  transition: transform 0.2s, box-shadow 0.2s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.fab-btn:active {
+  transform: scale(0.9);
+  box-shadow: 0 2px 8px rgba(139,69,19,0.2);
+}
+
+/* ===== 响应式设计 ===== */
+@media (min-width: 768px) {
+  body { max-width: 768px; font-size: 15px; }
+  .card { padding: 20px; }
+  .btn { min-height: 44px; font-size: 15px; }
+  .fab-btn { right: calc(50% - 384px + 20px); }
+}
+
+@media (min-width: 1024px) {
+  body { max-width: 1024px; font-size: 16px; }
+  .stats-grid { grid-template-columns: repeat(4, 1fr); }
+  .card { padding: 24px; }
+  .fab-btn { right: calc(50% - 512px + 20px); }
+}
+
+@media (min-width: 1440px) {
+  body { max-width: 1280px; }
+  .fab-btn { right: calc(50% - 640px + 20px); }
 }

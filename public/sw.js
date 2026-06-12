@@ -1,5 +1,5 @@
 // ===== 巧克力工厂 PWA Service Worker =====
-const CACHE_NAME = 'choco-factory-v2';
+const CACHE_NAME = 'choco-factory-v3';
 const CACHE_URLS = [
   '/',
   '/css/style.css',
