@@ -1129,6 +1129,199 @@ app.post('/api/procurement-orders/:id/confirm-receiving', requireRole('warehouse
   res.json({ success: true, status: newStatus, inbound_no: inNo });
 });
 
+// ===== 采购申请 API（全岗位覆盖） =====
+
+// 提交采购申请
+app.post('/api/purchase-requests', requireRole('clerk','supervisor','team','qc','packaging','warehouse','warehouse_admin','procurement','admin'), upload.single('image'), function(req, res) {
+  var b = req.body;
+  if (!b.product_name || !b.quantity) return res.json({ success: false, msg: '请填写产品名称和数量' });
+  var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM purchase_requests"))[0].c + 1;
+  var rno = 'CG' + String(cnt).padStart(6, '0');
+  var imageUrl = req.file ? '/uploads/' + req.file.filename : (b.image_url || '');
+  var dept = b.department || req.session.user.role;
+  var priority = b.priority || 'normal';
+  if (!['urgent','normal','backup'].includes(priority)) priority = 'normal';
+
+  dbRun("INSERT INTO purchase_requests (request_no,applicant_id,applicant_name,applicant_role,department,product_name,product_color,product_size,product_material,quantity,image_url,priority,status,notes) VALUES ('" + rno + "'," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(req.session.user.role) + "','" + safe(dept) + "','" + safe(b.product_name) + "','" + safe(b.product_color||'') + "','" + safe(b.product_size||'') + "','" + safe(b.product_material||'') + "'," + safeNum(b.quantity) + ",'" + safe(imageUrl) + "','" + safe(priority) + "','pending','" + safe(b.notes||'') + "')");
+
+  // 紧急采购自动审批
+  var rid = rowsToObjects(dbQuery("SELECT last_insert_rowid() as id"));
+  var reqId = rid.length ? rid[0].id : 0;
+  if (priority === 'urgent') {
+    dbRun("UPDATE purchase_requests SET status='approved',updated_at=CURRENT_TIMESTAMP WHERE id=" + reqId);
+    dbRun("INSERT INTO purchase_request_logs (request_id,operator_id,operator_name,operator_role,action,action_detail,old_status,new_status) VALUES (" + reqId + "," + req.session.user.id + ",'系统','system','auto_approve','紧急采购自动审批通过','pending','approved')");
+    addNotif('procurement', null, 'purchase_request', '紧急采购申请: '+safe(b.product_name), '申请单号:'+rno+' 产品:'+safe(b.product_name)+' 数量:'+safeNum(b.quantity)+'（自动审批，请立即处理）', reqId);
+  } else if (priority === 'normal') {
+    addNotif('admin', null, 'purchase_request', '常规采购审批: '+safe(b.product_name), '申请单号:'+rno+' 提交人:'+safe(req.session.user.real_name||'')+' 产品:'+safe(b.product_name)+' 数量:'+safeNum(b.quantity), reqId);
+    addNotif('warehouse_admin', null, 'purchase_request', '常规采购审批: '+safe(b.product_name), '申请单号:'+rno+' 提交人:'+safe(req.session.user.real_name||'')+' 产品:'+safe(b.product_name)+' 数量:'+safeNum(b.quantity), reqId);
+  } else {
+    addNotif('procurement', null, 'purchase_request', '备用采购申请: '+safe(b.product_name), '申请单号:'+rno+'（排队处理中）', reqId);
+  }
+
+  res.json({ success: true, request_no: rno, auto_approved: priority === 'urgent' });
+});
+
+// 获取采购申请列表
+app.get('/api/purchase-requests', requireRole('admin','procurement','warehouse_admin'), function(req, res) {
+  var sql = "SELECT pr.* FROM purchase_requests pr WHERE 1=1";
+  if (req.query.status) sql += " AND pr.status='" + safe(req.query.status) + "'";
+  if (req.query.priority) sql += " AND pr.priority='" + safe(req.query.priority) + "'";
+  if (req.query.keyword) {
+    var kw = safe(req.query.keyword);
+    sql += " AND (pr.product_name LIKE '%" + kw + "%' OR pr.request_no LIKE '%" + kw + "%' OR pr.applicant_name LIKE '%" + kw + "%')";
+  }
+  sql += " ORDER BY CASE pr.priority WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, pr.created_at DESC LIMIT 100";
+  res.json(rowsToObjects(dbQuery(sql)));
+});
+
+// 获取我的采购申请
+app.get('/api/purchase-requests/mine', requireLogin, function(req, res) {
+  var requests = rowsToObjects(dbQuery("SELECT pr.*,pp.amount as payment_amount,pp.payment_date,pp.voucher_url as payment_voucher,pp.payment_method,pp.notes as payment_notes FROM purchase_requests pr LEFT JOIN purchase_payments pp ON pr.proc_order_id=pp.proc_order_id WHERE pr.applicant_id=" + req.session.user.id + " ORDER BY pr.created_at DESC LIMIT 50"));
+  requests.forEach(function(r) {
+    r.logs = rowsToObjects(dbQuery("SELECT * FROM purchase_request_logs WHERE request_id=" + r.id + " ORDER BY created_at"));
+  });
+  res.json(requests);
+});
+
+// 审批采购申请
+app.put('/api/purchase-requests/:id/approve', requireRole('admin','warehouse_admin'), function(req, res) {
+  var r = rowToObject(dbQuery("SELECT * FROM purchase_requests WHERE id=" + req.params.id));
+  if (!r) return res.json({ success: false, msg: '申请不存在' });
+  if (r.status !== 'pending') return res.json({ success: false, msg: '当前状态不可审批' });
+  dbRun("UPDATE purchase_requests SET status='approved',updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
+  dbRun("INSERT INTO purchase_request_logs (request_id,operator_id,operator_name,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(req.session.user.role) + "','approve','审批通过','pending','approved')");
+  addNotif('procurement', null, 'purchase_request', '采购申请已审批: '+safe(r.product_name), '申请单号:'+safe(r.request_no)+' 请创建采购单', req.params.id);
+  if (r.applicant_id) addNotif(null, r.applicant_id, 'purchase_request', '您的采购申请已通过审批', '申请单号:'+safe(r.request_no)+' 产品:'+safe(r.product_name), req.params.id);
+  res.json({ success: true });
+});
+
+// 驳回采购申请
+app.put('/api/purchase-requests/:id/reject', requireRole('admin','warehouse_admin','procurement'), function(req, res) {
+  var b = req.body, reason = b.reason || '未填写原因';
+  var r = rowToObject(dbQuery("SELECT * FROM purchase_requests WHERE id=" + req.params.id));
+  if (!r) return res.json({ success: false, msg: '申请不存在' });
+  if (!['pending','approved'].includes(r.status)) return res.json({ success: false, msg: '当前状态不可驳回' });
+  dbRun("UPDATE purchase_requests SET status='rejected',rejection_reason='" + safe(reason) + "',rejection_by='" + safe(req.session.user.real_name||'') + "',rejection_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
+  dbRun("INSERT INTO purchase_request_logs (request_id,operator_id,operator_name,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(req.session.user.role) + "','reject','" + safe(reason) + "','" + safe(r.status) + "','rejected')");
+  if (r.applicant_id) addNotif(null, r.applicant_id, 'purchase_request', '您的采购申请被驳回', '申请单号:'+safe(r.request_no)+' 产品:'+safe(r.product_name)+' 原因:'+safe(reason), req.params.id);
+  res.json({ success: true });
+});
+
+// 重新提交被驳回的申请
+app.put('/api/purchase-requests/:id/resubmit', requireRole('clerk','supervisor','team','qc','packaging','warehouse','procurement','admin'), function(req, res) {
+  var b = req.body;
+  var r = rowToObject(dbQuery("SELECT * FROM purchase_requests WHERE id=" + req.params.id));
+  if (!r) return res.json({ success: false, msg: '申请不存在' });
+  if (r.status !== 'rejected') return res.json({ success: false, msg: '只有已驳回的申请可重新提交' });
+  var updates = [];
+  if (b.product_name) updates.push("product_name='" + safe(b.product_name) + "'");
+  if (b.product_color !== undefined) updates.push("product_color='" + safe(b.product_color) + "'");
+  if (b.product_size !== undefined) updates.push("product_size='" + safe(b.product_size) + "'");
+  if (b.product_material !== undefined) updates.push("product_material='" + safe(b.product_material) + "'");
+  if (b.quantity) updates.push("quantity=" + safeNum(b.quantity));
+  if (b.notes !== undefined) updates.push("notes='" + safe(b.notes) + "'");
+  if (b.priority) updates.push("priority='" + safe(b.priority) + "'");
+  updates.push("status='pending'");
+  updates.push("rejection_reason=NULL");
+  updates.push("rejection_by=NULL");
+  updates.push("updated_at=CURRENT_TIMESTAMP");
+  dbRun("UPDATE purchase_requests SET " + updates.join(',') + " WHERE id=" + req.params.id);
+  dbRun("INSERT INTO purchase_request_logs (request_id,operator_id,operator_name,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(req.session.user.role) + "','resubmit','修改后重新提交','rejected','pending')");
+  addNotif('admin', null, 'purchase_request', '采购申请重新提交: '+safe(b.product_name||r.product_name), '申请单号:'+safe(r.request_no)+' 申请人已修改并重新提交', req.params.id);
+  res.json({ success: true });
+});
+
+// 转为正式采购单
+app.post('/api/purchase-requests/:id/convert', requireRole('procurement','admin'), function(req, res) {
+  var b = req.body;
+  var r = rowToObject(dbQuery("SELECT * FROM purchase_requests WHERE id=" + req.params.id));
+  if (!r) return res.json({ success: false, msg: '申请不存在' });
+  if (r.status !== 'approved') return res.json({ success: false, msg: '只有已审批的申请可转为采购单' });
+
+  var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM procurement_orders"))[0].c + 1;
+  var pno = 'CG' + String(cnt).padStart(6, '0');
+
+  dbRun("INSERT INTO procurement_orders (order_no,material_type,material_id,material_name,material_spec,current_stock,min_alert,apply_qty,suggested_qty,estimated_price,actual_price,priority,status,supplier_id,applicant_id,request_id,contract_url,quote_url,order_date,unit_price,trigger_reason,notes) VALUES ('" + pno + "','raw',0,'" + safe(r.product_name) + "','" + safe(r.product_color||'') + " " + safe(r.product_size||'') + " " + safe(r.product_material||'') + "',0,0," + r.quantity + "," + safeNum(b.suggested_qty||r.quantity) + "," + safeNum(b.estimated_price) + ",NULL,'" + safe(r.priority) + "','pending','" + (b.supplier_id ? safeNum(b.supplier_id) : 'NULL') + "'," + r.applicant_id + "," + r.id + ",'" + safe(b.contract_url||'') + "','" + safe(b.quote_url||'') + "','" + safe(b.order_date||'') + "'," + safeNum(b.unit_price) + ",'采购申请" + safe(r.request_no) + "','" + safe(b.notes||'') + "')");
+
+  var pid = rowsToObjects(dbQuery("SELECT last_insert_rowid() as id"));
+  var poId = pid.length ? pid[0].id : 0;
+
+  dbRun("UPDATE purchase_requests SET status='converted',proc_order_id=" + poId + ",updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
+  dbRun("INSERT INTO purchase_request_logs (request_id,operator_id,operator_name,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(req.session.user.role) + "','convert','转为采购单" + pno + "','approved','converted')");
+  dbRun("INSERT INTO procurement_operation_logs (proc_order_id,operator_id,operator_role,action,action_detail,old_status,new_status) VALUES (" + poId + "," + req.session.user.id + ",'" + safe(req.session.user.role) + "','create','根据采购申请" + safe(r.request_no) + "创建采购单','','pending')");
+
+  if (r.applicant_id) addNotif(null, r.applicant_id, 'purchase_request', '您的采购申请已生成采购单', '申请单号:'+safe(r.request_no)+' → 采购单号:'+pno, req.params.id);
+
+  res.json({ success: true, procurement_no: pno });
+});
+
+// ===== 付款记录 API =====
+app.post('/api/procurement-orders/:id/payment', requireRole('procurement','admin'), function(req, res) {
+  var b = req.body, poId = req.params.id;
+  var order = rowToObject(dbQuery("SELECT * FROM procurement_orders WHERE id=" + poId));
+  if (!order) return res.json({ success: false, msg: '采购单不存在' });
+
+  dbRun("INSERT INTO purchase_payments (proc_order_id,request_id,amount,payment_date,payment_method,voucher_url,notes,uploaded_by) VALUES (" + poId + "," + (order.request_id||'NULL') + "," + safeNum(b.amount) + ",'" + safe(b.payment_date||(new Date().toISOString().slice(0,10))) + "','" + safe(b.payment_method||'') + "','" + safe(b.voucher_url||'') + "','" + safe(b.notes||'') + "'," + req.session.user.id + ")");
+
+  dbRun("INSERT INTO procurement_operation_logs (proc_order_id,operator_id,operator_role,action,action_detail,old_status,new_status) VALUES (" + poId + "," + req.session.user.id + ",'" + safe(req.session.user.role) + "','payment','付款" + safeNum(b.amount) + "元 " + safe(b.payment_method||'') + "','" + safe(order.status) + "','" + safe(order.status) + "')");
+
+  // 通知申请人
+  if (order.request_id) {
+    var req = rowToObject(dbQuery("SELECT * FROM purchase_requests WHERE id=" + order.request_id));
+    if (req && req.applicant_id) {
+      addNotif(null, req.applicant_id, 'purchase_payment', '采购付款已完成', '采购单'+safe(order.order_no)+' 产品:'+safe(order.material_name)+' 金额:'+safeNum(b.amount)+'元', order.request_id);
+    }
+  }
+
+  res.json({ success: true });
+});
+
+// 获取付款记录
+app.get('/api/procurement-orders/:id/payments', requireRole('procurement','admin','warehouse','warehouse_admin','clerk','supervisor'), function(req, res) {
+  res.json(rowsToObjects(dbQuery("SELECT * FROM purchase_payments WHERE proc_order_id=" + req.params.id + " ORDER BY created_at DESC")));
+});
+
+// ===== 供应商拒单记录 =====
+app.post('/api/procurement-orders/:id/supplier-reject', requireRole('procurement','admin'), function(req, res) {
+  var b = req.body;
+  dbRun("INSERT INTO supplier_rejections (proc_order_id,supplier_id,supplier_name,reason,recorded_by) VALUES (" + req.params.id + "," + safeNum(b.supplier_id) + ",'" + safe(b.supplier_name||'') + "','" + safe(b.reason||'') + "'," + req.session.user.id + ")");
+  dbRun("UPDATE procurement_orders SET status='supplier_reject',supplier_reject_reason='" + safe(b.reason||'') + "',updated_at=CURRENT_TIMESTAMP WHERE id=" + req.params.id);
+  dbRun("INSERT INTO procurement_operation_logs (proc_order_id,operator_id,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + req.session.user.id + ",'" + safe(req.session.user.role) + "','supplier_reject','供应商拒单: " + safe(b.reason||'') + "','','supplier_reject')");
+
+  var order = rowToObject(dbQuery("SELECT * FROM procurement_orders WHERE id=" + req.params.id));
+  if (order && order.request_id) {
+    var req = rowToObject(dbQuery("SELECT * FROM purchase_requests WHERE id=" + order.request_id));
+    if (req && req.applicant_id) addNotif(null, req.applicant_id, 'purchase_request', '供应商拒单通知', '采购单'+safe(order.order_no)+' 供应商'+safe(b.supplier_name||'')+'拒单: '+safe(b.reason||''), order.request_id);
+  }
+  res.json({ success: true });
+});
+
+// 获取采购单详细
+app.get('/api/procurement-orders/:id/detail', requireRole('procurement','admin','warehouse','warehouse_admin'), function(req, res) {
+  var order = rowToObject(dbQuery("SELECT po.*,s.name as supplier_name,s.contact_person,s.phone FROM procurement_orders po LEFT JOIN suppliers s ON po.supplier_id=s.id WHERE po.id=" + req.params.id));
+  if (!order) return res.json({ error: '不存在' });
+  order.logs = rowsToObjects(dbQuery("SELECT * FROM procurement_operation_logs WHERE proc_order_id=" + req.params.id + " ORDER BY created_at"));
+  order.payments = rowsToObjects(dbQuery("SELECT * FROM purchase_payments WHERE proc_order_id=" + req.params.id + " ORDER BY created_at DESC"));
+  order.rejections = rowsToObjects(dbQuery("SELECT * FROM supplier_rejections WHERE proc_order_id=" + req.params.id + " ORDER BY created_at DESC"));
+  order.discrepancies = rowsToObjects(dbQuery("SELECT * FROM arrival_discrepancies WHERE proc_order_id=" + req.params.id + " ORDER BY created_at DESC"));
+  if (order.request_id) {
+    order.request = rowToObject(dbQuery("SELECT * FROM purchase_requests WHERE id=" + order.request_id));
+  }
+  res.json(order);
+});
+
+// ===== 到货差异记录 =====
+app.post('/api/procurement-orders/:id/discrepancy', requireRole('warehouse','warehouse_admin','admin'), function(req, res) {
+  var b = req.body;
+  var order = rowToObject(dbQuery("SELECT * FROM procurement_orders WHERE id=" + req.params.id));
+  if (!order) return res.json({ success: false, msg: '采购单不存在' });
+  var expected = order.apply_qty, actual = safeNum(b.actual_qty), diff = expected - actual;
+  dbRun("INSERT INTO arrival_discrepancies (proc_order_id,expected_qty,actual_qty,diff_qty,diff_reason,recorded_by) VALUES (" + req.params.id + "," + expected + "," + actual + "," + diff + ",'" + safe(b.diff_reason||'') + "'," + req.session.user.id + ")");
+  dbRun("INSERT INTO procurement_operation_logs (proc_order_id,operator_id,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + req.session.user.id + ",'warehouse','discrepancy','到货差异: 预期'+expected+'实收'+actual+' 差异'+diff,'" + safe(order.status) + "','" + safe(order.status) + "')");
+  addNotif('procurement', null, 'procurement_discrepancy', '到货数量差异', '采购单'+safe(order.order_no)+' 预期'+expected+'实收'+actual+' 差异'+diff+' 原因:'+safe(b.diff_reason||''), req.params.id);
+  res.json({ success: true });
+});
+
 // SPA 回退
 app.get('{*any}', function(req, res) {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

@@ -102,6 +102,10 @@ function navigate(page) {
     case 'warehouse-inbound': renderWarehouseInbound(); break;
     case 'warehouse-auxiliary': renderWarehouseAuxiliary(); break;
     case 'warehouse-receiving': renderWarehouseReceiving(); break;
+    case 'purchase-request': renderPurchaseRequestForm(); break;
+    case 'my-purchases': renderMyPurchases(); break;
+    case 'purchase-list': renderPurchaseList(); break;
+    case 'purchase-detail': renderPurchaseDetail(); break;
     case 'warehouse-procurement': renderProcurementList(); break;
     case 'warehouse-procurement-new': renderProcurementNew(); break;
     case 'warehouse-procurement-detail': renderProcurementDetail(); break;
@@ -163,6 +167,8 @@ async function renderDashboard() {
     clerk: [
       { id: 'clerk-orders', icon: '📋', label: '订单管理' },
       { id: 'clerk-new', icon: '➕', label: '新建订单' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
@@ -170,30 +176,40 @@ async function renderDashboard() {
       { id: 'supervisor-pending', icon: '📥', label: '待派单' },
       { id: 'supervisor-stats', icon: '📊', label: '统计' },
       { id: 'supervisor-requisition', icon: '📋', label: '领料' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📈', label: '数据' }
     ],
     team: [
       { id: 'team-list', icon: '🏭', label: '待生产' },
       { id: 'team-rework', icon: '🔄', label: '补产' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
     qc: [
       { id: 'qc-list', icon: '🔍', label: '待质检' },
       { id: 'qc-requisition', icon: '📋', label: '领料' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
     packaging: [
       { id: 'pack-list', icon: '📦', label: '待打包' },
       { id: 'pack-requisition', icon: '📋', label: '领料' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
     console: [
       { id: 'console-overview', icon: '🖥️', label: '总台总览' },
       { id: 'console-orders', icon: '📋', label: '全部订单' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '数据统计' }
     ],
@@ -201,6 +217,8 @@ async function renderDashboard() {
       { id: 'finance-overview', icon: '💰', label: '财务总览' },
       { id: 'finance-wages', icon: '💵', label: '工资核算' },
       { id: 'finance-prices', icon: '🏷️', label: '计件工价' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     warehouse: [
@@ -213,27 +231,38 @@ async function renderDashboard() {
       { id: 'warehouse-inbound', icon: '📥', label: '入库' },
       { id: 'warehouse-receiving', icon: '📦', label: '到货' },
       { id: 'warehouse-ledger', icon: '📒', label: '台账' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     warehouse_admin: [
       { id: 'warehouse-procurement', icon: '📋', label: '采购处理' },
+      { id: 'purchase-list', icon: '📊', label: '采购审批' },
       { id: 'warehouse-suppliers', icon: '🏢', label: '供应商' },
       { id: 'warehouse-materials', icon: '🧈', label: '原材料' },
       { id: 'warehouse-finished', icon: '🏭', label: '成品仓' },
       { id: 'warehouse-outbound', icon: '🚚', label: '出库' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     procurement: [
       { id: 'warehouse-procurement', icon: '📋', label: '采购处理' },
+      { id: 'purchase-list', icon: '📊', label: '申请列表' },
       { id: 'warehouse-suppliers', icon: '🏢', label: '供应商' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     preparation: [
       { id: 'preparation-list', icon: '🧪', label: '配料记录' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     admin: [
       { id: 'admin', icon: '⚙️', label: '管理' },
+      { id: 'purchase-list', icon: '📊', label: '采购审批' },
+      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
       { id: 'stats', icon: '📊', label: '统计' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'clerk-orders', icon: '📋', label: '全部订单' }
@@ -2847,6 +2876,184 @@ async function submitProcReceiving(id) {
   });
   if (res.success) { showToast('到货确认成功！入库单号: ' + (res.inbound_no||''), 'success'); closeModal(); navigate('warehouse-receiving'); }
   else showToast(res.msg || '确认失败', 'error');
+}
+
+// ===== 采购申请（全岗位覆盖） =====
+function renderPurchaseRequestForm() {
+  $('#app').innerHTML = `<div class="page-header"><h1>🛒 采购申请</h1><span class="role-badge">采购申请</span></div>
+    <div class="page-content">
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">💡 填写产品采购需求，紧急采购自动审批，常规采购需管理员审核</div>
+      <div class="card">
+        <div class="form-group"><label>产品名称 *</label><input class="form-input" id="pr-name" placeholder="请输入产品名称"></div>
+        <div class="form-group"><label>产品颜色</label><input class="form-input" id="pr-color" placeholder="如：金色、红色"></div>
+        <div class="form-group"><label>产品尺寸</label><input class="form-input" id="pr-size" placeholder="如：30×20×5cm"></div>
+        <div class="form-group"><label>产品材质</label><input class="form-input" id="pr-material" placeholder="如：牛皮纸、硅胶"></div>
+        <div class="form-group"><label>申请数量 *</label><input class="form-input" id="pr-qty" type="number" min="1" value="1"></div>
+        <div class="form-group"><label>产品照片</label><input type="file" id="pr-image" accept="image/*" style="font-size:13px;margin-top:4px"></div>
+        <div class="form-group"><label>申请部门</label><input class="form-input" id="pr-dept"></div>
+        <div class="form-group"><label>优先级 *</label>
+          <select class="form-input" id="pr-priority">
+            <option value="urgent">🔴 紧急 — 自动审批，24h内处理</option>
+            <option value="normal" selected>🟡 常规 — 管理员审批，1-3个工作日</option>
+            <option value="backup">🟢 备用 — 排队处理，按批次采购</option>
+          </select>
+        </div>
+        <div class="form-group"><label>备注说明</label><textarea class="form-input" id="pr-notes" placeholder="采购原因、用途等补充说明"></textarea></div>
+        <button class="btn btn-primary btn-block" onclick="submitPurchaseRequest()">📤 提交采购申请</button>
+      </div>
+    </div>
+    ${renderTabBar('purchase-request')}`;
+}
+
+async function submitPurchaseRequest() {
+  var name = document.getElementById('pr-name').value.trim();
+  var qty = parseInt(document.getElementById('pr-qty').value)||0;
+  if (!name || !qty) return showToast('请填写产品名称和数量', 'error');
+  var formData = new FormData();
+  formData.append('product_name', name);
+  formData.append('product_color', document.getElementById('pr-color').value.trim());
+  formData.append('product_size', document.getElementById('pr-size').value.trim());
+  formData.append('product_material', document.getElementById('pr-material').value.trim());
+  formData.append('quantity', qty);
+  formData.append('department', document.getElementById('pr-dept').value.trim());
+  formData.append('priority', document.getElementById('pr-priority').value);
+  formData.append('notes', document.getElementById('pr-notes').value.trim());
+  var img = document.getElementById('pr-image').files[0];
+  if (img) formData.append('image', img);
+  try {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/purchase-requests', true);
+    xhr.onload = function() {
+      var res = JSON.parse(xhr.responseText);
+      if (res.success) {
+        var msg = res.auto_approved ? '紧急采购申请已自动审批！' : '采购申请已提交，等待审批。';
+        showToast('申请提交成功！单号: ' + res.request_no + ' — ' + msg, 'success');
+        setTimeout(function(){ navigate('my-purchases'); }, 1500);
+      } else showToast(res.msg || '提交失败', 'error');
+    };
+    xhr.send(formData);
+  } catch(e) { showToast('提交失败: ' + e.message, 'error'); }
+}
+
+async function renderMyPurchases() {
+  var requests = [];
+  try { requests = await API.get('/api/purchase-requests/mine'); } catch(e) {}
+  var statusMap = { pending:'⏳待审批', approved:'✅已审批', rejected:'❌已驳回', converted:'📋已转采购单', cancelled:'🚫已取消' };
+  var priMap = { urgent:'🔴紧急', normal:'🟡常规', backup:'🟢备用' };
+  $('#app').innerHTML = '<div class="page-header"><h1>📝 我的采购申请</h1><span class="role-badge">采购申请</span></div><div class="page-content">' +
+    (requests.length ? requests.map(function(r) {
+      var pColor = r.priority==='urgent'?'#CF1322':r.priority==='normal'?'#D48806':'#8C8C8C';
+      return '<div class="card" style="margin-bottom:8px;border-left:4px solid '+pColor+'" onclick="viewPurchaseDetail('+r.id+')">' +
+        '<div style="display:flex;justify-content:space-between"><strong>'+esc(r.request_no)+'</strong><span style="font-size:12px;color:'+pColor+'">'+ (priMap[r.priority]||r.priority) +'</span></div>' +
+        '<div style="font-size:13px;margin-top:4px">产品: '+esc(r.product_name)+' ×'+r.quantity+'</div>' +
+        (r.product_color||r.product_size||r.product_material?'<div style="font-size:11px;color:var(--text-secondary)">'+[r.product_color,r.product_size,r.product_material].filter(Boolean).join(' · ')+'</div>':'') +
+        '<div style="display:flex;justify-content:space-between;margin-top:6px"><span style="font-size:12px">'+(statusMap[r.status]||r.status)+'</span><span style="font-size:11px;color:var(--text-secondary)">'+(r.created_at||'').slice(0,10)+'</span></div>' +
+        (r.status==='rejected'&&r.rejection_reason?'<div style="font-size:11px;color:var(--error);margin-top:4px">驳回: '+esc(r.rejection_reason)+'</div>':'') +
+        (r.payment_amount?'<div style="font-size:12px;color:var(--success);margin-top:4px">💰 已付款 '+r.payment_amount+'元</div>':'') +
+        (r.status==='rejected'?'<button class="btn btn-accent btn-sm" style="margin-top:6px" onclick="event.stopPropagation();resubmitPurchase('+r.id+',\''+esc(r.product_name).replace(/'/g,"\\'")+'\','+r.quantity+')">修改重提</button>':'') +
+        '</div>';
+    }).join('') : '<div class="empty-state"><div class="empty-icon">📝</div>暂无采购申请<br><button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="navigate(\'purchase-request\')">提交采购申请</button></div>') +
+    '</div>' + renderTabBar('my-purchases');
+}
+
+function resubmitPurchase(id, name, qty) {
+  showModal('<h3>🔄 修改采购申请</h3>' +
+    '<div style="margin-bottom:8px"><label>产品名称</label><input class="form-input" id="resub-name" value="'+name+'"></div>' +
+    '<div style="margin-bottom:8px"><label>数量</label><input class="form-input" id="resub-qty" type="number" value="'+qty+'"></div>' +
+    '<div style="margin-bottom:8px"><label>优先级</label><select class="form-input" id="resub-pri"><option value="urgent">🔴 紧急</option><option value="normal" selected>🟡 常规</option><option value="backup">🟢 备用</option></select></div>' +
+    '<div style="margin-bottom:12px"><label>备注</label><input class="form-input" id="resub-notes"></div>' +
+    '<button class="btn btn-primary btn-block" onclick="submitResubmitPurchase('+id+')">重新提交</button>' +
+    '<button class="btn btn-outline btn-block" style="margin-top:6px" onclick="closeModal()">取消</button>');
+}
+async function submitResubmitPurchase(id) {
+  var res = await API.put('/api/purchase-requests/'+id+'/resubmit', { product_name: document.getElementById('resub-name').value.trim(), quantity: parseInt(document.getElementById('resub-qty').value)||1, priority: document.getElementById('resub-pri').value, notes: document.getElementById('resub-notes').value.trim() });
+  if (res.success) { showToast('申请已重新提交', 'success'); closeModal(); navigate('my-purchases'); }
+  else showToast(res.msg || '操作失败', 'error');
+}
+
+async function renderPurchaseList() {
+  var requests = [];
+  try { requests = await API.get('/api/purchase-requests'); } catch(e) {}
+  window._allRequests = requests;
+  var statusMap = { pending:'⏳待审批', approved:'✅已审批', rejected:'❌已驳回', converted:'📋已转采购单', cancelled:'🚫已取消' };
+  var priMap = { urgent:'🔴紧急', normal:'🟡常规', backup:'🟢备用' };
+  $('#app').innerHTML = '<div class="page-header"><h1>📊 采购申请管理</h1><span class="role-badge">采购管理</span></div><div class="page-content">' +
+    '<div class="filter-tags" style="margin-bottom:10px"><span class="filter-tag active" onclick="filterPurchaseReq(this,\'\')">全部</span><span class="filter-tag" onclick="filterPurchaseReq(this,\'pending\')">⏳待审批</span><span class="filter-tag" onclick="filterPurchaseReq(this,\'approved\')">✅已审批</span><span class="filter-tag" onclick="filterPurchaseReq(this,\'urgent\')">🔴紧急</span><span class="filter-tag" onclick="filterPurchaseReq(this,\'normal\')">🟡常规</span></div>' +
+    '<div id="purchase-req-list"></div></div>' + renderTabBar('purchase-list');
+  renderPurchaseReqItems(requests);
+}
+
+function renderPurchaseReqItems(requests) {
+  var list = $('#purchase-req-list');
+  if (!requests.length) { list.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div>暂无采购申请</div>'; return; }
+  var statusMap = { pending:'⏳待审批', approved:'✅已审批', rejected:'❌已驳回', converted:'📋已转采购单' };
+  var priMap = { urgent:'🔴紧急', normal:'🟡常规', backup:'🟢备用' };
+  list.innerHTML = requests.map(function(r) {
+    var pColor = r.priority==='urgent'?'#CF1322':r.priority==='normal'?'#D48806':'#8C8C8C';
+    return '<div class="card" style="margin-bottom:8px;border-left:4px solid '+pColor+'" onclick="viewPurchaseDetail('+r.id+')">' +
+      '<div style="display:flex;justify-content:space-between"><strong>'+esc(r.request_no)+'</strong><span style="font-size:12px;color:'+pColor+'">'+ (priMap[r.priority]||r.priority) +'</span></div>' +
+      '<div style="font-size:13px;margin-top:4px">产品: '+esc(r.product_name)+' ×'+r.quantity+'</div>' +
+      (r.product_color||r.product_size||r.product_material?'<div style="font-size:11px;color:var(--text-secondary)">'+[r.product_color,r.product_size,r.product_material].filter(Boolean).join(' · ')+'</div>':'') +
+      '<div style="display:flex;justify-content:space-between;margin-top:4px"><span>👤 '+esc(r.applicant_name||'')+'</span><span style="font-size:12px;font-weight:600">'+(statusMap[r.status]||r.status)+'</span></div>' +
+      '<div style="font-size:11px;color:var(--text-secondary)">部门: '+esc(r.department||r.applicant_role||'')+' | '+(r.created_at||'').slice(0,10)+'</div>' +
+      (r.status==='pending'?'<div style="margin-top:6px;display:flex;gap:6px"><button class="btn btn-success btn-sm" onclick="event.stopPropagation();approveRequest('+r.id+')">✅ 通过</button><button class="btn btn-danger btn-sm" onclick="event.stopPropagation();rejectRequest('+r.id+',\''+esc(r.product_name).replace(/'/g,"\\'")+'\')">❌ 驳回</button></div>':'') +
+      (r.status==='approved'?'<div style="margin-top:6px"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();convertToProcurement('+r.id+',\''+esc(r.product_name).replace(/'/g,"\\'")+'\','+r.quantity+')">📋 创建采购单</button></div>':'') +
+      '</div>';
+  }).join('');
+}
+
+function filterPurchaseReq(el, val) {
+  var tags = document.querySelectorAll('.filter-tag'); tags.forEach(function(t){t.classList.remove('active');}); el.classList.add('active');
+  var all = window._allRequests||[];
+  var filtered = val ? (['urgent','normal','backup'].includes(val) ? all.filter(function(r){return r.priority===val;}) : all.filter(function(r){return r.status===val;})) : all;
+  renderPurchaseReqItems(filtered);
+}
+function approveRequest(id) { if (!confirm('确认审批通过？')) return; API.put('/api/purchase-requests/'+id+'/approve').then(function(res){ if (res.success) { showToast('审批通过','success'); navigate('purchase-list'); } else showToast(res.msg||'操作失败','error'); }); }
+function rejectRequest(id, name) { showModal('<h3>❌ 驳回采购申请</h3><div style="margin-bottom:8px;font-weight:600">'+name+'</div><div style="margin-bottom:8px"><label>驳回原因 *</label><textarea class="form-input" id="reject-reason" placeholder="请填写驳回原因"></textarea></div><button class="btn btn-danger btn-block" onclick="submitRejectRequest('+id+')">确认驳回</button><button class="btn btn-outline btn-block" style="margin-top:6px" onclick="closeModal()">取消</button>'); }
+async function submitRejectRequest(id) { var reason = document.getElementById('reject-reason').value.trim(); if (!reason) return showToast('请填写驳回原因','error'); var res = await API.put('/api/purchase-requests/'+id+'/reject',{reason:reason}); if (res.success) { showToast('已驳回','success'); closeModal(); navigate('purchase-list'); } else showToast(res.msg||'操作失败','error'); }
+
+async function convertToProcurement(id, name, qty) {
+  try {
+    var suppliers = await API.get('/api/suppliers');
+    var sOpts = '<option value="">-- 不指定供应商 --</option>' + suppliers.map(function(s){return '<option value="'+s.id+'">'+esc(s.name)+'</option>';}).join('');
+    showModal('<h3>📋 创建采购单</h3><div style="margin-bottom:8px;font-weight:600">产品: '+name+' ×'+qty+'</div>' +
+      '<div style="margin-bottom:8px"><label>供应商</label><select class="form-input" id="conv-sid">'+sOpts+'</select></div>' +
+      '<div style="margin-bottom:8px"><label>建议采购量</label><input class="form-input" id="conv-qty" type="number" value="'+qty+'"></div>' +
+      '<div style="margin-bottom:8px"><label>预估单价(元)</label><input class="form-input" id="conv-price" type="number" step="0.01"></div>' +
+      '<div style="margin-bottom:8px"><label>下单日期</label><input class="form-input" id="conv-date" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>' +
+      '<div style="margin-bottom:12px"><label>备注</label><input class="form-input" id="conv-notes"></div>' +
+      '<button class="btn btn-primary btn-block" onclick="submitConvertToProcurement('+id+')">确认创建采购单</button>' +
+      '<button class="btn btn-outline btn-block" style="margin-top:6px" onclick="closeModal()">取消</button>');
+  } catch(e) { showToast('加载供应商失败','error'); }
+}
+async function submitConvertToProcurement(id) { var res = await API.post('/api/purchase-requests/'+id+'/convert', { supplier_id: parseInt(document.getElementById('conv-sid').value)||null, suggested_qty: parseInt(document.getElementById('conv-qty').value), estimated_price: parseFloat(document.getElementById('conv-price').value)||null, order_date: document.getElementById('conv-date').value, notes: document.getElementById('conv-notes').value.trim() }); if (res.success) { showToast('采购单创建成功！单号: '+res.procurement_no,'success'); closeModal(); navigate('purchase-list'); } else showToast(res.msg||'创建失败','error'); }
+
+function viewPurchaseDetail(id) { window._purchaseReqId = id; navigate('purchase-detail'); }
+async function renderPurchaseDetail() {
+  var id = window._purchaseReqId;
+  var requests = [];
+  try { requests = await API.get('/api/purchase-requests/mine'); } catch(e) {}
+  var r = requests.find(function(x){return x.id===id;});
+  if (!r) { try { var all = await API.get('/api/purchase-requests'); r = all.find(function(x){return x.id===id;}); } catch(e) {} }
+  if (!r) { showToast('申请不存在','error'); navigate('purchase-list'); return; }
+  var statusMap = { pending:'⏳待审批', approved:'✅已审批', rejected:'❌已驳回', converted:'📋已转采购单', cancelled:'🚫已取消' };
+  var priMap = { urgent:'🔴紧急', normal:'🟡常规', backup:'🟢备用' };
+  var logsHtml = (r.logs||[]).map(function(l){ return '<div style="padding:4px 0;border-bottom:1px dashed #eee;font-size:12px"><span style="color:var(--accent)">'+esc(l.action)+'</span> '+esc(l.action_detail||'')+' <span style="color:var(--text-secondary)">'+esc(l.operator_name||'')+' '+(l.created_at||'').slice(0,16).replace('T',' ')+'</span></div>'; }).join('');
+  $('#app').innerHTML = '<div class="page-header"><h1>📄 采购申请详情</h1></div><div class="page-content">' +
+    '<div class="detail-section"><h3>📋 申请信息</h3>' +
+    '<div class="detail-row"><span class="label">单号</span><span class="value" style="font-family:monospace">'+esc(r.request_no)+'</span></div>' +
+    '<div class="detail-row"><span class="label">状态</span><span class="value" style="font-weight:700">'+(statusMap[r.status]||r.status)+' '+(priMap[r.priority]||'')+'</span></div>' +
+    '<div class="detail-row"><span class="label">申请人</span><span class="value">'+esc(r.applicant_name||'')+' · '+esc(r.department||r.applicant_role||'')+'</span></div>' +
+    '<div class="detail-row"><span class="label">产品</span><span class="value" style="font-weight:700">'+esc(r.product_name)+'</span></div>' +
+    '<div class="detail-row"><span class="label">颜色</span><span class="value">'+esc(r.product_color||'-')+'</span></div>' +
+    '<div class="detail-row"><span class="label">尺寸</span><span class="value">'+esc(r.product_size||'-')+'</span></div>' +
+    '<div class="detail-row"><span class="label">材质</span><span class="value">'+esc(r.product_material||'-')+'</span></div>' +
+    '<div class="detail-row"><span class="label">数量</span><span class="value" style="font-weight:800;color:var(--accent)">'+r.quantity+'</span></div>' +
+    (r.image_url?'<img src="'+esc(r.image_url)+'" style="max-width:200px;border-radius:8px;margin-top:8px">':'') +
+    (r.rejection_reason?'<div class="detail-row"><span class="label">驳回原因</span><span class="value" style="color:var(--error)">'+esc(r.rejection_reason)+'</span></div>':'') +
+    '</div>' +
+    (logsHtml?'<div class="detail-section"><h3>📜 操作日志</h3>'+logsHtml+'</div>':'') +
+    '<button class="btn btn-outline btn-block" onclick="navigate(\'my-purchases\')">返回</button></div>';
 }
 
 // 供应商管理

@@ -650,6 +650,13 @@ function createTables() {
     );
   `);
 
+  // 扩展 procurement_orders 表（兼容旧数据库升级，柱已存在则忽略错误）
+  try { db.run("ALTER TABLE procurement_orders ADD COLUMN request_id INTEGER"); } catch(e) {}
+  try { db.run("ALTER TABLE procurement_orders ADD COLUMN contract_url TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE procurement_orders ADD COLUMN quote_url TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE procurement_orders ADD COLUMN order_date TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE procurement_orders ADD COLUMN unit_price REAL"); } catch(e) {}
+
   db.run(`
     CREATE TABLE IF NOT EXISTS suppliers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -703,6 +710,101 @@ function createTables() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (proc_order_id) REFERENCES procurement_orders(id),
       FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+    );
+  `);
+
+  // ===== 采购申请（全岗位） =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS purchase_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_no TEXT UNIQUE NOT NULL,
+      applicant_id INTEGER NOT NULL,
+      applicant_name TEXT,
+      applicant_role TEXT,
+      department TEXT,
+      product_name TEXT NOT NULL,
+      product_color TEXT,
+      product_size TEXT,
+      product_material TEXT,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      image_url TEXT,
+      priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('urgent','normal','backup')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','converted','cancelled')),
+      rejection_reason TEXT,
+      rejection_by TEXT,
+      rejection_at DATETIME,
+      proc_order_id INTEGER,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (applicant_id) REFERENCES users(id)
+    );
+  `);
+
+  // ===== 采购请求操作日志 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS purchase_request_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id INTEGER NOT NULL,
+      operator_id INTEGER NOT NULL,
+      operator_name TEXT,
+      operator_role TEXT,
+      action TEXT NOT NULL,
+      action_detail TEXT,
+      old_status TEXT,
+      new_status TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (request_id) REFERENCES purchase_requests(id),
+      FOREIGN KEY (operator_id) REFERENCES users(id)
+    );
+  `);
+
+  // ===== 采购付款记录 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS purchase_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      proc_order_id INTEGER NOT NULL,
+      request_id INTEGER,
+      amount REAL,
+      payment_date TEXT,
+      payment_method TEXT,
+      voucher_url TEXT,
+      notes TEXT,
+      uploaded_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (proc_order_id) REFERENCES procurement_orders(id),
+      FOREIGN KEY (uploaded_by) REFERENCES users(id)
+    );
+  `);
+
+  // ===== 供应商拒单记录 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS supplier_rejections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      proc_order_id INTEGER NOT NULL,
+      supplier_id INTEGER,
+      supplier_name TEXT,
+      reason TEXT,
+      recorded_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (proc_order_id) REFERENCES procurement_orders(id),
+      FOREIGN KEY (recorded_by) REFERENCES users(id)
+    );
+  `);
+
+  // ===== 到货差异记录 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS arrival_discrepancies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      proc_order_id INTEGER NOT NULL,
+      expected_qty INTEGER NOT NULL,
+      actual_qty INTEGER NOT NULL,
+      diff_qty INTEGER NOT NULL,
+      diff_reason TEXT,
+      recorded_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (proc_order_id) REFERENCES procurement_orders(id),
+      FOREIGN KEY (recorded_by) REFERENCES users(id)
     );
   `);
 
