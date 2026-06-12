@@ -79,6 +79,7 @@ function navigate(page) {
     case 'team-rework': renderTeamRework(); break;
     case 'qc-list': renderQCOrders(); break;
     case 'qc-inspect': renderQCInspect(); break;
+    case 'qc-requisition': renderRequisition(); break;
     case 'pack-list': renderPackOrders(); break;
     case 'pack-complete': renderPackComplete(); break;
     case 'console-overview': renderConsoleOverview(); break;
@@ -170,6 +171,7 @@ async function renderDashboard() {
     ],
     qc: [
       { id: 'qc-list', icon: '🔍', label: '待质检' },
+      { id: 'qc-requisition', icon: '📋', label: '领料' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
@@ -940,7 +942,12 @@ async function renderQCInspect() {
         <div class="detail-row"><span class="label">客户</span><span class="value">${order.customer_name}</span></div>
         <div class="detail-row"><span class="label">产品</span><span class="value">${order.product_name}</span></div>
         <div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:700;color:var(--primary)">${order.quantity}</span></div>
+        ${order.color_code ? '<div class="detail-row"><span class="label">产品色号</span><span class="value"><span class="color-card-display"><span class="color-swatch" style="background:'+order.color_code+'"></span>'+order.color_code+'</span></span></div>' : ''}
+        <div class="detail-row"><span class="label">内包材规格</span><span class="value">${order.inner_pack_spec||'-'} ×${order.inner_pack_qty||1}/件</span></div>
+        <div class="detail-row"><span class="label">包装袋规格</span><span class="value" style="font-weight:700;color:var(--accent)">${order.inner_pack_spec||'-'}</span></div>
+        ${order.image_url ? '<img src="'+order.image_url+'" style="max-width:160px;margin-top:8px;border-radius:8px">' : ''}
         ${(order.product_children||[]).length ? '<div style="margin-top:8px;font-size:13px;color:var(--accent)"><strong>子产品组合：</strong>'+order.product_children.map(function(c){return c.name+'×'+c.quantity}).join(' / ')+'</div>' : ''}
+        ${(order.product_images||[]).map(function(im){return '<img src="'+im.image_url+'" style="width:50px;height:50px;object-fit:cover;border-radius:4px;margin:4px;display:inline-block">';}).join('')}
       </div>
       
       <div class="detail-section">

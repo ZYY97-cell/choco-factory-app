@@ -341,7 +341,7 @@ app.get('/api/orders', requireLogin, function(req, res) {
 // 订单详情
 app.get('/api/orders/:id', requireLogin, function(req, res) {
   var oid = safeNum(req.params.id);
-  var order = rowToObject(dbQuery("SELECT o.*,c.name as customer_name,c.contact as customer_contact,c.notes as customer_notes,p.name as product_name,p.items_per_box,p.inner_pack_spec,p.inner_pack_qty,p.outer_pack_spec,p.image_url FROM orders o LEFT JOIN customers c ON o.customer_id=c.id LEFT JOIN products p ON o.product_id=p.id WHERE o.id=" + oid));
+  var order = rowToObject(dbQuery("SELECT o.*,c.name as customer_name,c.contact as customer_contact,c.notes as customer_notes,p.name as product_name,p.items_per_box,p.inner_pack_spec,p.inner_pack_qty,p.outer_pack_spec,p.image_url,p.color_code,p.details as product_details FROM orders o LEFT JOIN customers c ON o.customer_id=c.id LEFT JOIN products p ON o.product_id=p.id WHERE o.id=" + oid));
   if (!order) return res.status(404).json({ error: '订单不存在' });
   order.product_children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + order.product_id + " ORDER BY sort_order"));
   order.product_images = rowsToObjects(dbQuery("SELECT * FROM product_images WHERE product_id=" + order.product_id + " ORDER BY sort_order"));
@@ -560,7 +560,7 @@ app.post('/api/raw-materials/issue', requireRole('warehouse','admin'), function(
 });
 
 // 内包材
-app.get('/api/inner-pack-materials', requireRole('warehouse','admin','console','supervisor'), function(req, res) {
+app.get('/api/inner-pack-materials', requireRole('warehouse','admin','console','supervisor','qc'), function(req, res) {
   res.json(rowsToObjects(dbQuery("SELECT * FROM inner_pack_materials ORDER BY id")));
 });
 app.post('/api/inner-pack-materials', requireRole('warehouse','admin'), function(req, res) {
@@ -955,7 +955,7 @@ app.get('/api/export/orders/:id', requireLogin, function(req, res) {
 });
 
 // 物料领料申请
-app.post('/api/material-requisitions', requireRole('supervisor','admin'), function(req, res) {
+app.post('/api/material-requisitions', requireRole('supervisor','admin','qc'), function(req, res) {
   var b = req.body, type = b.type, mid = safeNum(b.material_id), qty = safeNum(b.quantity);
   if (!mid || !qty) return res.json({ success: false, msg: '请完善信息' });
   var table = type === 'raw' ? 'raw_materials' : type === 'inner' ? 'inner_pack_materials' : 'accessory_inventory';
