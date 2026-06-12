@@ -554,8 +554,13 @@ app.put('/api/raw-materials/:id', requireRole('warehouse','admin'), function(req
 });
 app.post('/api/raw-materials/issue', requireRole('warehouse','admin'), function(req, res) {
   var b = req.body;
-  dbRun("INSERT INTO raw_material_issues (material_id,quantity,issued_to_role,issued_to_name,issued_by,notes) VALUES (" + safeNum(b.material_id) + "," + safeNum(b.quantity) + ",'" + safe(b.issued_to_role||'') + "','" + safe(b.issued_to_name||'') + "'," + req.session.user.id + ",'" + safe(b.notes||'') + "')");
-  dbRun("UPDATE raw_materials SET stock_qty=stock_qty-" + safeNum(b.quantity) + " WHERE id=" + safeNum(b.material_id));
+  var mid = safeNum(b.material_id), qty = safeNum(b.quantity);
+  var m = rowToObject(dbQuery("SELECT * FROM raw_materials WHERE id=" + mid));
+  var sb = m ? m.stock_qty : 0;
+  dbRun("INSERT INTO raw_material_issues (material_id,quantity,issued_to_role,issued_to_name,issued_by,notes) VALUES (" + mid + "," + qty + ",'" + safe(b.issued_to_role||'') + "','" + safe(b.issued_to_name||'') + "'," + req.session.user.id + ",'" + safe(b.notes||'') + "')");
+  dbRun("UPDATE raw_materials SET stock_qty=stock_qty-" + qty + " WHERE id=" + mid);
+  // 台账记录
+  dbRun("INSERT INTO inventory_ledger (type,warehouse_type,material_id,material_name,material_spec,quantity,stock_before,stock_after,operator_id,operator_name,recipient,notes) VALUES ('outbound','raw'," + mid + ",'" + safe(m?m.name:'') + "','" + safe(m?m.spec:'') + "'," + qty + "," + sb + "," + Math.max(0,sb-qty) + "," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(b.issued_to_name||b.issued_to_role||'') + "','" + safe(b.notes||'') + "')");
   res.json({ success: true });
 });
 
@@ -575,8 +580,12 @@ app.put('/api/inner-pack-materials/:id', requireRole('warehouse','admin'), funct
 });
 app.post('/api/inner-pack-materials/issue', requireRole('warehouse','admin'), function(req, res) {
   var b = req.body;
-  dbRun("INSERT INTO inner_pack_issues (material_id,quantity,issued_to_team_id,issued_by) VALUES (" + safeNum(b.material_id) + "," + safeNum(b.quantity) + "," + safeNum(b.issued_to_team_id) + "," + req.session.user.id + ")");
-  dbRun("UPDATE inner_pack_materials SET stock_qty=stock_qty-" + safeNum(b.quantity) + " WHERE id=" + safeNum(b.material_id));
+  var mid = safeNum(b.material_id), qty = safeNum(b.quantity);
+  var m = rowToObject(dbQuery("SELECT * FROM inner_pack_materials WHERE id=" + mid));
+  var sb = m ? m.stock_qty : 0;
+  dbRun("INSERT INTO inner_pack_issues (material_id,quantity,issued_to_team_id,issued_by) VALUES (" + mid + "," + qty + "," + safeNum(b.issued_to_team_id) + "," + req.session.user.id + ")");
+  dbRun("UPDATE inner_pack_materials SET stock_qty=stock_qty-" + qty + " WHERE id=" + mid);
+  dbRun("INSERT INTO inventory_ledger (type,warehouse_type,material_id,material_name,material_spec,quantity,stock_before,stock_after,operator_id,operator_name,notes) VALUES ('outbound','inner'," + mid + ",'" + safe(m?m.name:'') + "','" + safe(m?m.spec:'') + "'," + qty + "," + sb + "," + Math.max(0,sb-qty) + "," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','领用出库')");
   res.json({ success: true });
 });
 
@@ -966,6 +975,158 @@ app.post('/api/material-requisitions', requireRole('supervisor','admin','qc','pa
   var relatedId = b.order_id ? safeNum(b.order_id) : 'NULL';
   dbRun("INSERT INTO notifications (user_id,role,type,title,content,related_id) VALUES (NULL,'warehouse','material_request','"+typeLabel+"领料申请','订单:"+safe(b.order_no||'-')+" "+safe(b.note||'')+" 物料:"+safe(m.name||'')+" 规格:"+safe(m.spec||'')+" 数量:"+qty+"',"+relatedId+")");
   res.json({ success: true, msg: '领料申请已提交至仓库' });
+});
+
+// ===== 统一台账 API =====
+app.get('/api/inventory-ledger', requireRole('warehouse','admin','warehouse_admin'), function(req, res) {
+  var sql = "SELECT l.* FROM inventory_ledger l WHERE 1=1";
+  if (req.query.type) sql += " AND l.type='" + safe(req.query.type) + "'";
+  if (req.query.warehouse_type) sql += " AND l.warehouse_type='" + safe(req.query.warehouse_type) + "'";
+  if (req.query.date_from) sql += " AND l.created_at >= '" + safe(req.query.date_from) + "'";
+  if (req.query.date_to) sql += " AND l.created_at <= '" + safe(req.query.date_to) + " 23:59:59'";
+  if (req.query.keyword) {
+    var kw = safe(req.query.keyword);
+    sql += " AND (l.material_name LIKE '%" + kw + "%' OR l.notes LIKE '%" + kw + "%' OR l.recipient LIKE '%" + kw + "%')";
+  }
+  sql += " ORDER BY l.created_at DESC LIMIT 200";
+  res.json(rowsToObjects(dbQuery(sql)));
+});
+
+// ===== 入库记录 API =====
+app.get('/api/inbound-records', requireRole('warehouse','admin','warehouse_admin'), function(req, res) {
+  var sql = "SELECT ir.*,s.name as supplier_name FROM inbound_records ir LEFT JOIN suppliers s ON ir.supplier_id=s.id WHERE 1=1";
+  if (req.query.warehouse_type) sql += " AND ir.warehouse_type='" + safe(req.query.warehouse_type) + "'";
+  sql += " ORDER BY ir.created_at DESC LIMIT 100";
+  res.json(rowsToObjects(dbQuery(sql)));
+});
+
+app.post('/api/inbound-records', requireRole('warehouse','admin','warehouse_admin'), function(req, res) {
+  var b = req.body;
+  var wt = safe(b.warehouse_type);
+  var mid = safeNum(b.material_id), qty = safeNum(b.quantity);
+  if (!wt || !mid || !qty) return res.json({ success: false, msg: '请完善入库信息' });
+
+  // 确定物料表和名称
+  var matTable = wt === 'raw' ? 'raw_materials' : wt === 'inner' ? 'inner_pack_materials' : wt === 'outer' ? 'outer_pack_materials' : 'auxiliary_materials';
+  var idField = 'id';
+  var m = rowToObject(dbQuery("SELECT * FROM " + matTable + " WHERE " + idField + "=" + mid));
+  if (!m) return res.json({ success: false, msg: '物料不存在' });
+  var sb = m.stock_qty || 0;
+
+  // 生成入库单号
+  var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM inbound_records"))[0].c + 1;
+  var inNo = 'RK' + String(cnt).padStart(6, '0');
+
+  // 入库
+  dbRun("UPDATE " + matTable + " SET stock_qty=stock_qty+" + qty + " WHERE " + idField + "=" + mid);
+  
+  // 入库记录
+  dbRun("INSERT INTO inbound_records (inbound_no,warehouse_type,material_id,material_name,material_spec,quantity,supplier_id,supplier_name,batch_number,production_date,receipt_date,inspector,related_order_id,related_procurement_id,operator_id,notes) VALUES ('" + inNo + "','" + wt + "'," + mid + ",'" + safe(m.name) + "','" + safe(m.spec||'') + "'," + qty + "," + safeNum(b.supplier_id) + ",'" + safe(b.supplier_name||'') + "','" + safe(b.batch_number||'') + "','" + safe(b.production_date||'') + "','" + safe(b.receipt_date||(new Date().toISOString().slice(0,10))) + "','" + safe(b.inspector||'') + "'," + safeNum(b.related_order_id) + "," + safeNum(b.related_procurement_id) + "," + req.session.user.id + ",'" + safe(b.notes||'') + "')");
+
+  // 台账记录
+  dbRun("INSERT INTO inventory_ledger (type,warehouse_type,material_id,material_name,material_spec,quantity,stock_before,stock_after,batch_number,operator_id,operator_name,supplier_id,related_order_id,related_procurement_id,notes) VALUES ('inbound','" + wt + "'," + mid + ",'" + safe(m.name) + "','" + safe(m.spec||'') + "'," + qty + "," + sb + "," + (sb+qty) + ",'" + safe(b.batch_number||'') + "'," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "'," + safeNum(b.supplier_id) + "," + safeNum(b.related_order_id) + "," + safeNum(b.related_procurement_id) + ",'入库单号:" + inNo + " " + safe(b.notes||'') + "')");
+
+  res.json({ success: true, inbound_no: inNo });
+});
+
+// ===== 外包材领用 API =====
+app.post('/api/outer-pack-materials/issue', requireRole('warehouse','admin'), function(req, res) {
+  var b = req.body;
+  var mid = safeNum(b.material_id), qty = safeNum(b.quantity);
+  if (!mid || !qty) return res.json({ success: false, msg: '请完善信息' });
+  var m = rowToObject(dbQuery("SELECT * FROM outer_pack_materials WHERE id=" + mid));
+  if (!m) return res.json({ success: false, msg: '物料不存在' });
+  var sb = m.stock_qty || 0;
+  if (sb < qty) return res.json({ success: false, msg: '库存不足，当前库存：' + sb });
+
+  dbRun("INSERT INTO outer_pack_issues (material_id,quantity,issued_to_role,issued_to_name,issued_by,related_order_id,notes) VALUES (" + mid + "," + qty + ",'" + safe(b.issued_to_role||'') + "','" + safe(b.issued_to_name||'') + "'," + req.session.user.id + "," + safeNum(b.related_order_id) + ",'" + safe(b.notes||'') + "')");
+  dbRun("UPDATE outer_pack_materials SET stock_qty=stock_qty-" + qty + " WHERE id=" + mid);
+  dbRun("INSERT INTO inventory_ledger (type,warehouse_type,material_id,material_name,material_spec,quantity,stock_before,stock_after,operator_id,operator_name,recipient,related_order_id,notes) VALUES ('outbound','outer'," + mid + ",'" + safe(m.name) + "','" + safe(m.spec||'') + "'," + qty + "," + sb + "," + Math.max(0,sb-qty) + "," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(b.issued_to_name||b.issued_to_role||'') + "'," + safeNum(b.related_order_id) + ",'" + safe(b.notes||'') + "')");
+  res.json({ success: true });
+});
+
+// ===== 辅料库 API =====
+app.get('/api/auxiliary-materials', requireRole('warehouse','admin','warehouse_admin','supervisor'), function(req, res) {
+  res.json(rowsToObjects(dbQuery("SELECT * FROM auxiliary_materials ORDER BY id")));
+});
+
+app.post('/api/auxiliary-materials', requireRole('warehouse','admin'), function(req, res) {
+  var b = req.body;
+  dbRun("INSERT INTO auxiliary_materials (name,spec,unit,category,stock_qty,min_alert,location,notes) VALUES ('" + safe(b.name) + "','" + safe(b.spec||'') + "','" + safe(b.unit||'个') + "','" + safe(b.category||'耗材') + "'," + safeNum(b.stock_qty,0) + "," + safeNum(b.min_alert,0) + ",'" + safe(b.location||'') + "','" + safe(b.notes||'') + "')");
+  res.json({ success: true });
+});
+
+app.put('/api/auxiliary-materials/:id', requireRole('warehouse','admin'), function(req, res) {
+  var b = req.body;
+  var existing = rowToObject(dbQuery("SELECT * FROM auxiliary_materials WHERE id=" + req.params.id));
+  if (!existing) return res.json({ success: false, msg: '物料不存在' });
+  dbRun("UPDATE auxiliary_materials SET name='" + safe(b.name||existing.name) + "',spec='" + safe(b.spec!==undefined?b.spec:existing.spec||'') + "',unit='" + safe(b.unit||existing.unit||'个') + "',category='" + safe(b.category||existing.category||'耗材') + "',stock_qty=" + safeNum(b.stock_qty!==undefined?b.stock_qty:existing.stock_qty,0) + ",min_alert=" + safeNum(b.min_alert!==undefined?b.min_alert:existing.min_alert,0) + ",location='" + safe(b.location!==undefined?b.location:existing.location||'') + "',notes='" + safe(b.notes!==undefined?b.notes:existing.notes||'') + "' WHERE id=" + req.params.id);
+  res.json({ success: true });
+});
+
+app.post('/api/auxiliary-materials/issue', requireRole('warehouse','admin'), function(req, res) {
+  var b = req.body;
+  var mid = safeNum(b.material_id), qty = safeNum(b.quantity);
+  if (!mid || !qty) return res.json({ success: false, msg: '请完善信息' });
+  var m = rowToObject(dbQuery("SELECT * FROM auxiliary_materials WHERE id=" + mid));
+  if (!m) return res.json({ success: false, msg: '物料不存在' });
+  var sb = m.stock_qty || 0;
+  if (sb < qty) return res.json({ success: false, msg: '库存不足，当前库存：' + sb });
+
+  dbRun("INSERT INTO auxiliary_material_issues (material_id,quantity,issued_to_role,issued_to_name,issued_by,related_order_id,notes) VALUES (" + mid + "," + qty + ",'" + safe(b.issued_to_role||'') + "','" + safe(b.issued_to_name||'') + "'," + req.session.user.id + "," + safeNum(b.related_order_id) + ",'" + safe(b.notes||'') + "')");
+  dbRun("UPDATE auxiliary_materials SET stock_qty=stock_qty-" + qty + " WHERE id=" + mid);
+  dbRun("INSERT INTO inventory_ledger (type,warehouse_type,material_id,material_name,material_spec,quantity,stock_before,stock_after,operator_id,operator_name,recipient,related_order_id,notes) VALUES ('outbound','auxiliary'," + mid + ",'" + safe(m.name) + "','" + safe(m.spec||'') + "'," + qty + "," + sb + "," + Math.max(0,sb-qty) + "," + req.session.user.id + ",'" + safe(req.session.user.real_name||'') + "','" + safe(b.issued_to_name||b.issued_to_role||'') + "'," + safeNum(b.related_order_id) + ",'" + safe(b.notes||'') + "')");
+  res.json({ success: true });
+});
+
+// ===== 采购到货确认（仓库端） =====
+app.get('/api/procurement-orders/pending-receiving', requireRole('warehouse','warehouse_admin','admin'), function(req, res) {
+  var orders = rowsToObjects(dbQuery("SELECT po.*,s.name as supplier_name FROM procurement_orders po LEFT JOIN suppliers s ON po.supplier_id=s.id WHERE po.status IN ('ordered','partial_arrived') ORDER BY po.priority='urgent' DESC, po.created_at ASC"));
+  res.json(orders);
+});
+
+app.post('/api/procurement-orders/:id/confirm-receiving', requireRole('warehouse','warehouse_admin','admin'), function(req, res) {
+  var b = req.body, uid = req.session.user.id;
+  var order = rowToObject(dbQuery("SELECT * FROM procurement_orders WHERE id=" + req.params.id));
+  if (!order) return res.json({ success: false, msg: '采购单不存在' });
+  if (!['ordered','partial_arrived'].includes(order.status)) return res.json({ success: false, msg: '当前状态不可收货' });
+
+  var actualQty = safeNum(b.actual_qty, order.apply_qty);
+  var conclusion = b.conclusion || 'pass';
+  var matTable = order.material_type === 'raw' ? 'raw_materials'
+    : order.material_type === 'inner' ? 'inner_pack_materials'
+    : order.material_type === 'outer' ? 'outer_pack_materials'
+    : 'auxiliary_materials';
+
+  // 获取物料当前库存
+  var m = rowToObject(dbQuery("SELECT * FROM " + matTable + " WHERE id=" + order.material_id));
+  var sb = m ? (m.stock_qty||0) : 0;
+
+  // 入库
+  dbRun("UPDATE " + matTable + " SET stock_qty=stock_qty+" + actualQty + " WHERE id=" + order.material_id);
+
+  // 自检报告
+  dbRun("INSERT INTO arrival_inspection_reports (proc_order_id,supplier_id,report_number,report_date,batch_number,inspector,conclusion,notes) VALUES (" + req.params.id + "," + (order.supplier_id||0) + ",'" + safe(b.report_number||'') + "','" + safe(b.report_date||'') + "','" + safe(b.batch_number||'') + "','" + safe(b.inspector||'') + "','" + safe(conclusion) + "','" + safe(b.notes||'') + "')");
+
+  // 入库记录
+  var cnt = rowsToObjects(dbQuery("SELECT COUNT(*) as c FROM inbound_records"))[0].c + 1;
+  var inNo = 'RK' + String(cnt).padStart(6, '0');
+  dbRun("INSERT INTO inbound_records (inbound_no,warehouse_type,material_id,material_name,material_spec,quantity,supplier_id,supplier_name,batch_number,receipt_date,inspector,related_procurement_id,operator_id,notes) VALUES ('" + inNo + "','" + order.material_type + "'," + order.material_id + ",'" + safe(order.material_name) + "','" + safe(order.material_spec||'') + "'," + actualQty + "," + (order.supplier_id||0) + ",'" + safe(b.supplier_name||'') + "','" + safe(b.batch_number||'') + "','" + safe(b.receipt_date||(new Date().toISOString().slice(0,10))) + "','" + safe(b.inspector||'') + "'," + req.params.id + "," + uid + ",'采购到货: " + order.order_no + " " + safe(b.notes||'') + "')");
+
+  // 台账
+  dbRun("INSERT INTO inventory_ledger (type,warehouse_type,material_id,material_name,material_spec,quantity,stock_before,stock_after,batch_number,operator_id,operator_name,supplier_id,related_procurement_id,notes) VALUES ('inbound','" + order.material_type + "'," + order.material_id + ",'" + safe(order.material_name) + "','" + safe(order.material_spec||'') + "'," + actualQty + "," + sb + "," + (sb+actualQty) + ",'" + safe(b.batch_number||'') + "'," + uid + ",'" + safe(req.session.user.real_name||'') + "'," + (order.supplier_id||0) + "," + req.params.id + ",'采购到货确认: " + order.order_no + "')");
+
+  // 更新采购单状态
+  var newStatus = actualQty < order.apply_qty ? 'partial_arrived'
+    : conclusion === 'fail' ? 'inspection_fail'
+    : 'arrived';
+  dbRun("UPDATE procurement_orders SET status='" + newStatus + "'" + (newStatus === 'arrived' ? ",arrived_at=CURRENT_TIMESTAMP" : "") + " WHERE id=" + req.params.id);
+
+  // 操作日志
+  dbRun("INSERT INTO procurement_operation_logs (proc_order_id,operator_id,operator_role,action,action_detail,old_status,new_status) VALUES (" + req.params.id + "," + uid + ",'" + safe(req.session.user.role) + "','arrive','到货确认 数量:" + actualQty + " 结论:" + conclusion + "','" + safe(order.status) + "','" + newStatus + "')");
+
+  addNotif('warehouse_admin', null, 'procurement_arrived', '采购到货: ' + order.material_name, '采购单' + order.order_no + '已到货，实收' + actualQty + '，入库单号:' + inNo, req.params.id);
+  res.json({ success: true, status: newStatus, inbound_no: inNo });
 });
 
 // SPA 回退

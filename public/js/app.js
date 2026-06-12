@@ -98,6 +98,10 @@ function navigate(page) {
     case 'warehouse-outer': renderWarehouseOuter(); break;
     case 'warehouse-finished': renderWarehouseFinished(); break;
     case 'warehouse-outbound': renderWarehouseOutbound(); break;
+    case 'warehouse-ledger': renderWarehouseLedger(); break;
+    case 'warehouse-inbound': renderWarehouseInbound(); break;
+    case 'warehouse-auxiliary': renderWarehouseAuxiliary(); break;
+    case 'warehouse-receiving': renderWarehouseReceiving(); break;
     case 'warehouse-procurement': renderProcurementList(); break;
     case 'warehouse-procurement-new': renderProcurementNew(); break;
     case 'warehouse-procurement-detail': renderProcurementDetail(); break;
@@ -203,8 +207,12 @@ async function renderDashboard() {
       { id: 'warehouse-materials', icon: '🧈', label: '原材料' },
       { id: 'warehouse-inner', icon: '📥', label: '内包材' },
       { id: 'warehouse-outer', icon: '📦', label: '外包材' },
+      { id: 'warehouse-auxiliary', icon: '🔧', label: '辅料' },
       { id: 'warehouse-finished', icon: '🏭', label: '成品仓' },
       { id: 'warehouse-outbound', icon: '🚚', label: '出库' },
+      { id: 'warehouse-inbound', icon: '📥', label: '入库' },
+      { id: 'warehouse-receiving', icon: '📦', label: '到货' },
+      { id: 'warehouse-ledger', icon: '📒', label: '台账' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     warehouse_admin: [
@@ -1876,6 +1884,9 @@ function renderTabBar(activeTab) {
       { id: 'warehouse-materials', icon: '🧈', label: '原料' },
       { id: 'warehouse-finished', icon: '🏭', label: '成品' },
       { id: 'warehouse-outbound', icon: '🚚', label: '出库' },
+      { id: 'warehouse-inbound', icon: '📥', label: '入库' },
+      { id: 'warehouse-receiving', icon: '📦', label: '到货' },
+      { id: 'warehouse-ledger', icon: '📒', label: '台账' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     warehouse_admin: [
@@ -2518,6 +2529,323 @@ async function doProcArrive(id) {
     conclusion: document.getElementById('mod-conc').value, inspection_fail_reason: document.getElementById('mod-freason').value
   });
   if (res.success) { showToast('到货已确认', 'success'); closeModal(); navigate('warehouse-procurement'); }
+  else showToast(res.msg || '确认失败', 'error');
+}
+
+// ===== 仓库：台账管理 =====
+async function renderWarehouseLedger() {
+  var records = [];
+  try { records = await API.get('/api/inventory-ledger'); } catch(e) {}
+  window._ledgerRecords = records;
+
+  var typeMap = { inbound: '📥入库', outbound: '📤出库', adjust: '🔄调整' };
+  var wtMap = { raw: '原材料', inner: '内包材', outer: '外包材', auxiliary: '辅料', finished: '成品' };
+
+  $('#app').innerHTML = `<div class="page-header"><h1>📒 出入库台账</h1><span class="role-badge">仓库管理</span></div>
+    <div class="page-content">
+      <div class="filter-tags" style="margin-bottom:10px">
+        <span class="filter-tag active" onclick="filterLedger(this,'')">全部</span>
+        <span class="filter-tag" onclick="filterLedger(this,'inbound')">📥 入库</span>
+        <span class="filter-tag" onclick="filterLedger(this,'outbound')">📤 出库</span>
+        <span class="filter-tag" onclick="filterLedger(this,'raw')">🧈 原材料</span>
+        <span class="filter-tag" onclick="filterLedger(this,'inner')">📥 内包材</span>
+        <span class="filter-tag" onclick="filterLedger(this,'outer')">📦 外包材</span>
+        <span class="filter-tag" onclick="filterLedger(this,'auxiliary')">🔧 辅料</span>
+      </div>
+      <div id="ledger-list"></div>
+    </div>
+    ${renderTabBar('warehouse-ledger')}`;
+
+  renderLedgerItems(records);
+}
+
+function renderLedgerItems(records) {
+  var list = $('#ledger-list');
+  if (!records.length) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">📒</div>暂无台账记录</div>';
+    return;
+  }
+  var typeMap = { inbound:'📥入库', outbound:'📤出库', adjust:'🔄调整' };
+  var wtMap = { raw:'🧈原材料', inner:'📥内包材', outer:'📦外包材', auxiliary:'🔧辅料', finished:'🏭成品' };
+
+  list.innerHTML = records.map(function(r) {
+    var color = r.type === 'inbound' ? 'var(--success)' : r.type === 'outbound' ? 'var(--error)' : 'var(--accent)';
+    return '<div class="card" style="margin-bottom:6px;border-left:4px solid ' + color + '">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start">' +
+      '<div style="flex:1">' +
+      '<div style="font-weight:700;font-size:13px">' + (typeMap[r.type]||r.type) + ' ' + (wtMap[r.warehouse_type]||r.warehouse_type) + '</div>' +
+      '<div style="font-size:12px;margin-top:2px">' + esc(r.material_name) + (r.material_spec ? ' · ' + esc(r.material_spec) : '') + '</div>' +
+      (r.recipient ? '<div style="font-size:11px;color:var(--text-secondary)">领用人: ' + esc(r.recipient) + '</div>' : '') +
+      (r.batch_number ? '<div style="font-size:11px;color:var(--text-secondary)">批次: ' + esc(r.batch_number) + '</div>' : '') +
+      (r.notes ? '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">' + esc(r.notes) + '</div>' : '') +
+      '</div>' +
+      '<div style="text-align:right;min-width:80px">' +
+      '<div style="font-size:18px;font-weight:800;color:' + color + '">' + (r.type==='outbound'?'-':'+') + r.quantity + '</div>' +
+      '<div style="font-size:10px;color:var(--text-secondary)">库存: ' + (r.stock_before||0) + '→' + (r.stock_after||0) + '</div>' +
+      '<div style="font-size:10px;color:var(--text-secondary)">' + (r.created_at||'').slice(0,16).replace('T',' ') + '</div>' +
+      '</div></div></div>';
+  }).join('');
+}
+
+function filterLedger(el, val) {
+  document.querySelectorAll('#ledger-list').length && (function(){
+    var tags = document.querySelectorAll('.filter-tag');
+    tags.forEach(function(t) { t.classList.remove('active'); });
+    el.classList.add('active');
+  })();
+  var records = window._ledgerRecords || [];
+  var filtered = val
+    ? (['inbound','outbound','adjust'].includes(val)
+      ? records.filter(function(r){return r.type === val;})
+      : records.filter(function(r){return r.warehouse_type === val;}))
+    : records;
+  renderLedgerItems(filtered);
+}
+
+// ===== 仓库：入库管理 =====
+async function renderWarehouseInbound() {
+  var records = [];
+  var suppliers = [];
+  try { records = await API.get('/api/inbound-records'); } catch(e) {}
+  try { suppliers = await API.get('/api/suppliers'); } catch(e) {}
+  window._inboundSuppliers = suppliers;
+
+  var mtMap = { raw:'原材料', inner:'内包材', outer:'外包材', auxiliary:'辅料' };
+  var typeOptions = [
+    { val:'raw', label:'🧈 原材料仓', mats:'/api/raw-materials' },
+    { val:'inner', label:'📥 内包材仓', mats:'/api/inner-pack-materials' },
+    { val:'outer', label:'📦 外包材仓', mats:'/api/outer-pack-materials' },
+    { val:'auxiliary', label:'🔧 辅料仓', mats:'/api/auxiliary-materials' }
+  ];
+
+  $('#app').innerHTML = `<div class="page-header"><h1>📥 入库管理</h1><span class="role-badge">仓库管理</span></div>
+    <div class="page-content">
+      <button class="btn btn-primary btn-sm" style="margin-bottom:10px" onclick="showAddInbound()">+ 新建入库单</button>
+      ${records.length ? '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">最近入库记录</div>' +
+        records.slice(0,20).map(function(r) {
+          return '<div class="card" style="margin-bottom:6px"><div style="display:flex;justify-content:space-between"><div><strong>' + esc(r.inbound_no) + '</strong> <span style="font-size:12px">' + (mtMap[r.warehouse_type]||r.warehouse_type) + '</span></div><span style="font-weight:700;color:var(--success)">+' + r.quantity + '</span></div>' +
+          '<div style="font-size:12px;color:var(--text-secondary)">' + esc(r.material_name) + ' · ' + esc(r.material_spec||'') + (r.batch_number?' · 批次:'+esc(r.batch_number):'') + '</div>' +
+          (r.supplier_name?'<div style="font-size:11px;color:var(--text-secondary)">供应商: '+esc(r.supplier_name)+' | 日期: '+(r.receipt_date||'').slice(0,10)+'</div>':'') +
+          '</div>';
+        }).join('') : '<div class="empty-state"><div class="empty-icon">📥</div>暂无入库记录</div>'}
+    </div>
+    ${renderTabBar('warehouse-inbound')}`;
+
+  window._inboundTypes = typeOptions;
+}
+
+function showAddInbound() {
+  var types = window._inboundTypes || [];
+  showModal('<h3>📥 新建入库单</h3>' +
+    '<div style="margin-bottom:8px"><label>入库仓库 *</label>' +
+    '<select class="form-input" id="in-wtype" onchange="onInboundTypeChange()">' +
+    '<option value="">请选择仓库</option>' +
+    types.map(function(t){return '<option value="'+t.val+'">'+t.label+'</option>';}).join('') +
+    '</select></div>' +
+    '<div style="margin-bottom:8px"><label>入库物料 *</label>' +
+    '<select class="form-input" id="in-mid"><option value="">请先选择仓库</option></select></div>' +
+    '<div style="margin-bottom:8px"><label>入库数量 *</label><input class="form-input" id="in-qty" type="number" min="1"></div>' +
+    '<div style="margin-bottom:8px"><label>供应商</label>' +
+    '<select class="form-input" id="in-sid"><option value="">-- 不关联供应商 --</option>' +
+    (window._inboundSuppliers||[]).map(function(s){return '<option value="'+s.id+'|'+esc(s.name)+'">'+esc(s.name)+'</option>';}).join('') +
+    '</select></div>' +
+    '<div style="margin-bottom:8px"><label>批次号</label><input class="form-input" id="in-batch" placeholder="生产批次/批号"></div>' +
+    '<div style="margin-bottom:8px"><label>生产日期</label><input class="form-input" id="in-proddate" type="date"></div>' +
+    '<div style="margin-bottom:8px"><label>入库日期</label><input class="form-input" id="in-date" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>' +
+    '<div style="margin-bottom:8px"><label>检验人</label><input class="form-input" id="in-insp" placeholder="检验人姓名"></div>' +
+    '<div style="margin-bottom:12px"><label>备注</label><input class="form-input" id="in-note" placeholder="备注信息"></div>' +
+    '<button class="btn btn-primary btn-block" onclick="submitInbound()">确认入库</button>' +
+    '<button class="btn btn-outline btn-block" style="margin-top:6px" onclick="closeModal()">取消</button>');
+}
+
+async function onInboundTypeChange() {
+  var wt = document.getElementById('in-wtype').value;
+  var sel = document.getElementById('in-mid');
+  if (!wt) { sel.innerHTML = '<option value="">请先选择仓库</option>'; return; }
+  var types = window._inboundTypes || [];
+  var t = types.find(function(x){return x.val === wt;});
+  if (!t) return;
+  try {
+    var mats = await API.get(t.mats);
+    sel.innerHTML = mats.map(function(m){
+      return '<option value="'+m.id+'">'+esc(m.name)+' ('+esc(m.spec||'')+') | 库存:'+(m.stock_qty||0)+'</option>';
+    }).join('');
+  } catch(e) { sel.innerHTML = '<option value="">加载失败</option>'; }
+}
+
+async function submitInbound() {
+  var wt = document.getElementById('in-wtype').value;
+  var mid = parseInt(document.getElementById('in-mid').value);
+  var qty = parseInt(document.getElementById('in-qty').value);
+  if (!wt || !mid || !qty || qty < 1) return showToast('请完善入库信息', 'error');
+  var sVal = document.getElementById('in-sid').value;
+  var sid = null, sname = '';
+  if (sVal) { var parts = sVal.split('|'); sid = parseInt(parts[0]); sname = parts[1]||''; }
+  var res = await API.post('/api/inbound-records', {
+    warehouse_type: wt, material_id: mid, quantity: qty,
+    supplier_id: sid, supplier_name: sname,
+    batch_number: document.getElementById('in-batch').value,
+    production_date: document.getElementById('in-proddate').value,
+    receipt_date: document.getElementById('in-date').value,
+    inspector: document.getElementById('in-insp').value,
+    notes: document.getElementById('in-note').value
+  });
+  if (res.success) { showToast('入库成功！单号: ' + res.inbound_no, 'success'); closeModal(); navigate('warehouse-inbound'); }
+  else showToast(res.msg || '入库失败', 'error');
+}
+
+// ===== 仓库：辅料库管理 =====
+async function renderWarehouseAuxiliary() {
+  var mats = [];
+  try { mats = await API.get('/api/auxiliary-materials'); } catch(e) {}
+
+  var catMap = {};
+  mats.forEach(function(m) { var c = m.category || '耗材'; if (!catMap[c]) catMap[c] = []; catMap[c].push(m); });
+
+  $('#app').innerHTML = `<div class="page-header"><h1>🔧 辅料库管理</h1><span class="role-badge">仓库管理</span></div>
+    <div class="page-content">
+      <button class="btn btn-primary btn-sm" style="margin-bottom:10px" onclick="showAddAuxiliary()">+ 添加辅料</button>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">💡 辅料包括模具、生产耗材、工具等非生产原料类物料</div>
+      ${mats.length ? Object.keys(catMap).map(function(cat) {
+        var items = catMap[cat];
+        return '<div style="margin-bottom:12px"><div style="font-weight:700;font-size:14px;margin-bottom:6px;color:var(--accent)">📂 ' + esc(cat) + '</div>' +
+          items.map(function(m) {
+            var low = m.stock_qty <= (m.min_alert||0) && m.min_alert > 0;
+            return '<div class="card" style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;align-items:center">' +
+              '<div><div style="font-weight:700">' + esc(m.name) + '</div>' +
+              '<div style="font-size:12px;color:var(--text-secondary)">规格: ' + esc(m.spec||'-') + ' | 单位: ' + esc(m.unit||'个') + (m.location?' | 库位: '+esc(m.location):'') + '</div></div>' +
+              '<div style="text-align:right"><div style="font-size:20px;font-weight:800;color:'+(low?'var(--error)':'var(--success)')+'">' + m.stock_qty + '</div>' +
+              '<div style="font-size:11px;color:'+(low?'var(--error)':'var(--text-secondary)')+'">'+(low?'⚠️ 低库存':'库存')+'</div></div></div>' +
+              '<div style="margin-top:6px;display:flex;gap:6px">' +
+              '<button class="btn btn-outline btn-sm" onclick="adjustAuxiliary('+m.id+',\''+esc(m.name).replace(/'/g,"\\'")+'\','+m.stock_qty+','+(m.min_alert||0)+')">调整库存</button>' +
+              '<button class="btn btn-accent btn-sm" onclick="issueAuxiliary('+m.id+',\''+esc(m.name).replace(/'/g,"\\'")+'\')">领用出库</button></div></div>';
+          }).join('') + '</div>';
+      }).join('') : '<div class="empty-state"><div class="empty-icon">🔧</div>暂无辅料</div>'}
+    </div>
+    ${renderTabBar('warehouse-auxiliary')}`;
+}
+
+function showAddAuxiliary() {
+  showModal('<h3>🔧 添加辅料</h3>' +
+    '<div style="margin-bottom:8px"><label>名称 *</label><input class="form-input" id="aux-name"></div>' +
+    '<div style="margin-bottom:8px"><label>规格</label><input class="form-input" id="aux-spec"></div>' +
+    '<div style="margin-bottom:8px"><label>单位</label><input class="form-input" id="aux-unit" value="个"></div>' +
+    '<div style="margin-bottom:8px"><label>类别</label><select class="form-input" id="aux-cat"><option value="模具">模具</option><option value="耗材">耗材</option><option value="工具">工具</option><option value="配件">配件</option><option value="包装">包装</option></select></div>' +
+    '<div style="margin-bottom:8px"><label>库存数量</label><input class="form-input" id="aux-qty" type="number" value="0"></div>' +
+    '<div style="margin-bottom:8px"><label>最低预警</label><input class="form-input" id="aux-alert" type="number" value="0"></div>' +
+    '<div style="margin-bottom:8px"><label>库位</label><input class="form-input" id="aux-loc"></div>' +
+    '<div style="margin-bottom:12px"><label>备注</label><input class="form-input" id="aux-notes"></div>' +
+    '<button class="btn btn-primary btn-block" onclick="submitAddAuxiliary()">确认添加</button>' +
+    '<button class="btn btn-outline btn-block" style="margin-top:6px" onclick="closeModal()">取消</button>');
+}
+
+async function submitAddAuxiliary() {
+  var res = await API.post('/api/auxiliary-materials', {
+    name: document.getElementById('aux-name').value.trim(),
+    spec: document.getElementById('aux-spec').value.trim(),
+    unit: document.getElementById('aux-unit').value.trim(),
+    category: document.getElementById('aux-cat').value,
+    stock_qty: parseInt(document.getElementById('aux-qty').value)||0,
+    min_alert: parseInt(document.getElementById('aux-alert').value)||0,
+    location: document.getElementById('aux-loc').value.trim(),
+    notes: document.getElementById('aux-notes').value.trim()
+  });
+  if (res.success) { showToast('辅料添加成功', 'success'); closeModal(); navigate('warehouse-auxiliary'); }
+  else showToast(res.msg || '添加失败', 'error');
+}
+
+function adjustAuxiliary(id, name, qty, alert) {
+  showModal('<h3>调整辅料库存</h3><div style="margin-bottom:12px;font-weight:600">' + name + '</div>' +
+    '<div style="margin-bottom:8px"><label>库存数量</label><input class="form-input" id="adj-qty" type="number" value="' + qty + '"></div>' +
+    '<div style="margin-bottom:8px"><label>最低预警</label><input class="form-input" id="adj-alert" type="number" value="' + alert + '"></div>' +
+    '<button class="btn btn-primary btn-block" onclick="submitAdjustAuxiliary(' + id + ')">确认</button>' +
+    '<button class="btn btn-outline btn-block" style="margin-top:6px" onclick="closeModal()">取消</button>');
+}
+
+async function submitAdjustAuxiliary(id) {
+  var qty = parseInt(document.getElementById('adj-qty').value);
+  if (isNaN(qty)) return showToast('请输入有效数量', 'error');
+  var res = await API.put('/api/auxiliary-materials/' + id, {
+    stock_qty: qty, min_alert: parseInt(document.getElementById('adj-alert').value)||0
+  });
+  if (res.success) { showToast('库存已更新', 'success'); closeModal(); navigate('warehouse-auxiliary'); }
+  else showToast(res.msg || '更新失败', 'error');
+}
+
+function issueAuxiliary(id, name) {
+  showModal('<h3>辅料领用出库</h3><div style="margin-bottom:12px;font-weight:600">' + name + '</div>' +
+    '<div style="margin-bottom:8px"><label>领用数量 *</label><input class="form-input" id="iss-qty" type="number" min="1"></div>' +
+    '<div style="margin-bottom:8px"><label>领用角色</label><input class="form-input" id="iss-role" placeholder="如：班组、配料等"></div>' +
+    '<div style="margin-bottom:8px"><label>领用人</label><input class="form-input" id="iss-name" placeholder="领用人姓名"></div>' +
+    '<div style="margin-bottom:8px"><label>关联订单ID（可选）</label><input class="form-input" id="iss-oid" type="number"></div>' +
+    '<div style="margin-bottom:12px"><label>备注</label><input class="form-input" id="iss-note"></div>' +
+    '<button class="btn btn-accent btn-block" onclick="submitIssueAuxiliary(' + id + ')">确认领用</button>' +
+    '<button class="btn btn-outline btn-block" style="margin-top:6px" onclick="closeModal()">取消</button>');
+}
+
+async function submitIssueAuxiliary(id) {
+  var qty = parseInt(document.getElementById('iss-qty').value);
+  if (!qty || qty < 1) return showToast('请输入领用数量', 'error');
+  var res = await API.post('/api/auxiliary-materials/issue', {
+    material_id: id, quantity: qty,
+    issued_to_role: document.getElementById('iss-role').value.trim(),
+    issued_to_name: document.getElementById('iss-name').value.trim(),
+    related_order_id: parseInt(document.getElementById('iss-oid').value)||null,
+    notes: document.getElementById('iss-note').value.trim()
+  });
+  if (res.success) { showToast('领用出库成功', 'success'); closeModal(); navigate('warehouse-auxiliary'); }
+  else showToast(res.msg || '出库失败', 'error');
+}
+
+// ===== 仓库：采购到货确认入口 =====
+async function renderWarehouseReceiving() {
+  var orders = [];
+  try { orders = await API.get('/api/procurement-orders/pending-receiving'); } catch(e) {}
+
+  $('#app').innerHTML = `<div class="page-header"><h1>📦 采购到货确认</h1><span class="role-badge">仓库管理</span></div>
+    <div class="page-content">
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">💡 确认已下单（ordered）或部分到货（partial_arrived）状态的采购单</div>
+      ${orders.length ? orders.map(function(o) {
+        var pColor = o.priority==='urgent'?'#CF1322':o.priority==='normal'?'#D48806':'#8C8C8C';
+        var pLabel = o.priority==='urgent'?'🔴紧急':o.priority==='normal'?'🟡常规':'🟢备用';
+        return '<div class="card" style="margin-bottom:8px;border-left:4px solid '+pColor+'">' +
+          '<div style="display:flex;justify-content:space-between"><strong>'+esc(o.order_no)+'</strong><span style="font-size:12px;color:'+pColor+'">'+pLabel+'</span></div>' +
+          '<div style="font-size:13px;margin-top:4px">物料: '+esc(o.material_name)+' · '+esc(o.material_spec||'')+'</div>' +
+          '<div style="font-size:12px;color:var(--text-secondary)">采购数量: '+o.apply_qty+' | 供应商: '+esc(o.supplier_name||'未指定')+'</div>' +
+          (o.status==='partial_arrived'?'<div style="font-size:12px;color:var(--warning)">⚠️ 部分到货</div>':'') +
+          '<div style="margin-top:6px"><button class="btn btn-success btn-sm" onclick="confirmProcReceiving('+o.id+',\''+esc(o.order_no).replace(/'/g,"\\'")+'\','+o.apply_qty+',\''+esc(o.material_name).replace(/'/g,"\\'")+'\')">✅ 到货确认</button></div></div>';
+      }).join('') : '<div class="empty-state"><div class="empty-icon">📦</div>暂无待收货采购单</div>'}
+    </div>
+    ${renderTabBar('warehouse-receiving')}`;
+}
+
+function confirmProcReceiving(id, orderNo, applyQty, matName) {
+  showModal('<h3>📦 采购到货确认</h3>' +
+    '<div style="margin-bottom:12px;font-weight:600">采购单: ' + orderNo + ' · ' + matName + '</div>' +
+    '<div style="margin-bottom:8px"><label>实际到货数量 *</label><input class="form-input" id="recv-qty" type="number" min="1" value="' + applyQty + '"></div>' +
+    '<div style="margin-bottom:8px"><label>批次号</label><input class="form-input" id="recv-batch" placeholder="生产批次"></div>' +
+    '<div style="margin-bottom:8px"><label>到货日期</label><input class="form-input" id="recv-date" type="date" value="' + new Date().toISOString().slice(0,10) + '"></div>' +
+    '<div style="margin-bottom:8px"><label>检验人</label><input class="form-input" id="recv-insp" placeholder="检验人姓名"></div>' +
+    '<div style="margin-bottom:8px"><label>检验结论</label><select class="form-input" id="recv-conc"><option value="pass">✅ 合格</option><option value="conditional">⚠️ 让步接收</option><option value="fail">❌ 不合格</option></select></div>' +
+    '<div style="margin-bottom:12px"><label>备注</label><input class="form-input" id="recv-note"></div>' +
+    '<button class="btn btn-success btn-block" onclick="submitProcReceiving(' + id + ')">确认到货入库</button>' +
+    '<button class="btn btn-outline btn-block" style="margin-top:6px" onclick="closeModal()">取消</button>');
+}
+
+async function submitProcReceiving(id) {
+  var qty = parseInt(document.getElementById('recv-qty').value);
+  if (!qty || qty < 1) return showToast('请输入到货数量', 'error');
+  var res = await API.post('/api/procurement-orders/' + id + '/confirm-receiving', {
+    actual_qty: qty,
+    batch_number: document.getElementById('recv-batch').value,
+    receipt_date: document.getElementById('recv-date').value,
+    inspector: document.getElementById('recv-insp').value,
+    conclusion: document.getElementById('recv-conc').value,
+    report_number: 'WH-' + new Date().toISOString().slice(0,10).replace(/-/g,''),
+    report_date: new Date().toISOString().slice(0,10),
+    notes: document.getElementById('recv-note').value
+  });
+  if (res.success) { showToast('到货确认成功！入库单号: ' + (res.inbound_no||''), 'success'); closeModal(); navigate('warehouse-receiving'); }
   else showToast(res.msg || '确认失败', 'error');
 }
 

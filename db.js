@@ -487,12 +487,110 @@ function createTables() {
       FOREIGN KEY (finished_goods_id) REFERENCES finished_goods(id)
     );
   `);
+  // ===== 统一台账 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS inventory_ledger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('inbound','outbound','adjust')),
+      warehouse_type TEXT NOT NULL CHECK(warehouse_type IN ('raw','inner','outer','auxiliary','finished')),
+      material_id INTEGER,
+      material_name TEXT NOT NULL,
+      material_spec TEXT,
+      quantity INTEGER NOT NULL,
+      stock_before INTEGER,
+      stock_after INTEGER,
+      batch_number TEXT,
+      related_order_id INTEGER,
+      related_procurement_id INTEGER,
+      supplier_id INTEGER,
+      operator_id INTEGER,
+      operator_name TEXT,
+      recipient TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // ===== 统一入库记录 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS inbound_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inbound_no TEXT UNIQUE NOT NULL,
+      warehouse_type TEXT NOT NULL CHECK(warehouse_type IN ('raw','inner','outer','auxiliary')),
+      material_id INTEGER NOT NULL,
+      material_name TEXT NOT NULL,
+      material_spec TEXT,
+      quantity INTEGER NOT NULL,
+      supplier_id INTEGER,
+      supplier_name TEXT,
+      batch_number TEXT,
+      production_date TEXT,
+      receipt_date TEXT,
+      inspector TEXT,
+      related_order_id INTEGER,
+      related_procurement_id INTEGER,
+      operator_id INTEGER,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // ===== 外包材领用记录 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS outer_pack_issues (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL,
+      issued_to_role TEXT,
+      issued_to_name TEXT,
+      issued_by INTEGER,
+      related_order_id INTEGER,
+      notes TEXT,
+      issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (material_id) REFERENCES outer_pack_materials(id),
+      FOREIGN KEY (issued_by) REFERENCES users(id)
+    );
+  `);
+
+  // ===== 辅料库 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS auxiliary_materials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      spec TEXT,
+      unit TEXT DEFAULT '个',
+      category TEXT DEFAULT '耗材',
+      stock_qty INTEGER DEFAULT 0,
+      min_alert INTEGER DEFAULT 0,
+      location TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // ===== 辅料领用记录 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS auxiliary_material_issues (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL,
+      issued_to_role TEXT,
+      issued_to_name TEXT,
+      issued_by INTEGER,
+      related_order_id INTEGER,
+      notes TEXT,
+      issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (material_id) REFERENCES auxiliary_materials(id),
+      FOREIGN KEY (issued_by) REFERENCES users(id)
+    );
+  `);
+
   // ===== 采购管理 =====
   db.run(`
     CREATE TABLE IF NOT EXISTS procurement_orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       order_no TEXT UNIQUE NOT NULL,
-      material_type TEXT NOT NULL CHECK(material_type IN ('raw','inner','outer')),
+      material_type TEXT NOT NULL CHECK(material_type IN ('raw','inner','outer','auxiliary')),
       material_id INTEGER NOT NULL,
       material_name TEXT NOT NULL,
       material_spec TEXT,
@@ -778,6 +876,16 @@ function seedData() {
   db.run("UPDATE inner_pack_materials SET min_alert = 2000 WHERE name = '脱氧剂'");
   db.run("UPDATE outer_pack_materials SET min_alert = 50 WHERE box_type IN ('飞机盒','礼盒')");
   db.run("UPDATE outer_pack_materials SET min_alert = 30 WHERE box_type = '外箱'");
+
+  // 辅料库种子数据
+  db.run("INSERT INTO auxiliary_materials (name, spec, unit, category, stock_qty, min_alert, location) VALUES ('巧克力模具-心形', '6连心形硅胶', '套', '模具', 50, 10, 'A-01')");
+  db.run("INSERT INTO auxiliary_materials (name, spec, unit, category, stock_qty, min_alert, location) VALUES ('巧克力模具-球形', '12连球形PC', '套', '模具', 30, 5, 'A-02')");
+  db.run("INSERT INTO auxiliary_materials (name, spec, unit, category, stock_qty, min_alert, location) VALUES ('巧克力模具-花朵', '8连花朵硅胶', '套', '模具', 40, 8, 'A-03')");
+  db.run("INSERT INTO auxiliary_materials (name, spec, unit, category, stock_qty, min_alert, location) VALUES ('一次性手套', '食品级PE手套 100只/盒', '盒', '耗材', 200, 30, 'B-01')");
+  db.run("INSERT INTO auxiliary_materials (name, spec, unit, category, stock_qty, min_alert, location) VALUES ('清洁刷', '不锈钢丝清洁刷', '把', '工具', 15, 3, 'B-02')");
+  db.run("INSERT INTO auxiliary_materials (name, spec, unit, category, stock_qty, min_alert, location) VALUES ('温湿度计', '电子温湿度计 数显', '个', '工具', 8, 2, 'B-03')");
+  db.run("INSERT INTO auxiliary_materials (name, spec, unit, category, stock_qty, min_alert, location) VALUES ('刮板', '塑料调温刮板', '把', '工具', 25, 5, 'B-04')");
+  db.run("INSERT INTO auxiliary_materials (name, spec, unit, category, stock_qty, min_alert, location) VALUES ('包装扎带', '金色扎带 100根/包', '包', '耗材', 80, 15, 'B-05')");
 
   // 供应商
   db.run("INSERT INTO suppliers (name, contact_person, phone, address, license_no, production_permit_no, food_permit_no) VALUES ('XX食品原料有限公司', '张经理', '13800001111', 'XX省XX市XX区XX路100号', '91110000XXXXXXXXXX', 'SC12345678901234', 'JY12345678901234')");
