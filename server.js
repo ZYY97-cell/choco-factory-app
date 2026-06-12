@@ -298,6 +298,14 @@ app.get('/api/orders', requireLogin, function(req, res) {
   res.json(orders);
 });
 
+// 订单详情
+app.get('/api/orders/:id', requireLogin, function(req, res) {
+  var oid = safeNum(req.params.id);
+  var order = rowToObject(dbQuery("SELECT o.*,c.name as customer_name,p.name as product_name,p.items_per_box FROM orders o LEFT JOIN customers c ON o.customer_id=c.id LEFT JOIN products p ON o.product_id=p.id WHERE o.id=" + oid));
+  if (!order) return res.status(404).json({ error: '订单不存在' });
+  res.json(order);
+});
+
 app.post('/api/orders', requireRole('clerk','admin'), function(req, res) {
   var b = req.body;
   var prefix = 'QK';
