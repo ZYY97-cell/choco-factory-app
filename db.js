@@ -82,7 +82,9 @@ function createTables() {
       details TEXT,
       color_code TEXT,
       color_card_image TEXT,
+      image_url TEXT,
       inner_pack_spec TEXT,
+      inner_pack_qty INTEGER DEFAULT 1,
       outer_pack_spec TEXT,
       items_per_box INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -96,6 +98,20 @@ function createTables() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       product_id INTEGER NOT NULL,
       image_url TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+  `);
+
+  // 子产品（主产品拆分）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS product_children (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      image_url TEXT,
       sort_order INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (product_id) REFERENCES products(id)

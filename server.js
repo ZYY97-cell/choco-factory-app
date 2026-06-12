@@ -217,18 +217,38 @@ app.get('/api/products', requireLogin, function(req, res) {
   var products = rowsToObjects(dbQuery(sql));
   products.forEach(function(p) {
     p.images = rowsToObjects(dbQuery("SELECT * FROM product_images WHERE product_id=" + p.id + " ORDER BY sort_order"));
+    p.children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + p.id + " ORDER BY sort_order"));
     p.accessories = rowsToObjects(dbQuery("SELECT pa.id as accessory_id,pa.name,IFNULL(ai.stock_qty,0) as stock_qty FROM product_accessories pa LEFT JOIN accessory_inventory ai ON pa.id=ai.accessory_id WHERE pa.product_id=" + p.id + " ORDER BY pa.sort_order"));
   });
   res.json(products);
 });
+// 单个产品详情
+app.get('/api/products/:id', requireLogin, function(req, res) {
+  var p = rowToObject(dbQuery("SELECT p.*,c.name as customer_name FROM products p LEFT JOIN customers c ON p.customer_id=c.id WHERE p.id=" + req.params.id));
+  if (!p) return res.status(404).json({ error: '产品不存在' });
+  p.images = rowsToObjects(dbQuery("SELECT * FROM product_images WHERE product_id=" + p.id + " ORDER BY sort_order"));
+  p.children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + p.id + " ORDER BY sort_order"));
+  p.accessories = rowsToObjects(dbQuery("SELECT pa.id as accessory_id,pa.name,IFNULL(ai.stock_qty,0) as stock_qty FROM product_accessories pa LEFT JOIN accessory_inventory ai ON pa.id=ai.accessory_id WHERE pa.product_id=" + p.id + " ORDER BY pa.sort_order"));
+  res.json(p);
+});
 app.post('/api/products', requireRole('admin','clerk'), function(req, res) {
   var b = req.body;
-  dbRun("INSERT INTO products (customer_id,name,details,color_code,inner_pack_spec,outer_pack_spec,items_per_box) VALUES (" + safeNum(b.customer_id) + ",'" + safe(b.name) + "','" + safe(b.details||'') + "','" + safe(b.color_code||'') + "','" + safe(b.inner_pack_spec||'') + "','" + safe(b.outer_pack_spec||'') + "'," + safeNum(b.items_per_box,0) + ")");
-  res.json({ success: true, id: getLastId() });
+  dbRun("INSERT INTO products (customer_id,name,details,color_code,image_url,inner_pack_spec,inner_pack_qty,outer_pack_spec,items_per_box) VALUES (" + safeNum(b.customer_id) + ",'" + safe(b.name) + "','" + safe(b.details||'') + "','" + safe(b.color_code||'') + "','" + safe(b.image_url||'') + "','" + safe(b.inner_pack_spec||'') + "'," + safeNum(b.inner_pack_qty,1) + ",'" + safe(b.outer_pack_spec||'') + "'," + safeNum(b.items_per_box,0) + ")");
+  var pid = getLastId();
+  // 子产品
+  (b.children||[]).forEach(function(ch, i) {
+    if (ch.name) dbRun("INSERT INTO product_children (product_id,name,quantity,image_url,sort_order) VALUES (" + pid + ",'" + safe(ch.name) + "'," + safeNum(ch.quantity,1) + ",'" + safe(ch.image_url||'') + "'," + i + ")");
+  });
+  res.json({ success: true, id: pid });
 });
 app.put('/api/products/:id', requireRole('admin','clerk'), function(req, res) {
   var b = req.body;
-  dbRun("UPDATE products SET customer_id=" + safeNum(b.customer_id) + ",name='" + safe(b.name) + "',details='" + safe(b.details||'') + "',color_code='" + safe(b.color_code||'') + "',inner_pack_spec='" + safe(b.inner_pack_spec||'') + "',outer_pack_spec='" + safe(b.outer_pack_spec||'') + "',items_per_box=" + safeNum(b.items_per_box,0) + " WHERE id=" + req.params.id);
+  dbRun("UPDATE products SET customer_id=" + safeNum(b.customer_id) + ",name='" + safe(b.name) + "',details='" + safe(b.details||'') + "',color_code='" + safe(b.color_code||'') + "',image_url='" + safe(b.image_url||'') + "',inner_pack_spec='" + safe(b.inner_pack_spec||'') + "',inner_pack_qty=" + safeNum(b.inner_pack_qty,1) + ",outer_pack_spec='" + safe(b.outer_pack_spec||'') + "',items_per_box=" + safeNum(b.items_per_box,0) + " WHERE id=" + req.params.id);
+  // 子产品：删除旧的，插入新的
+  dbRun("DELETE FROM product_children WHERE product_id=" + req.params.id);
+  (b.children||[]).forEach(function(ch, i) {
+    if (ch.name) dbRun("INSERT INTO product_children (product_id,name,quantity,image_url,sort_order) VALUES (" + req.params.id + ",'" + safe(ch.name) + "'," + safeNum(ch.quantity,1) + ",'" + safe(ch.image_url||'') + "'," + i + ")");
+  });
   res.json({ success: true });
 });
 app.delete('/api/products/:id', requireRole('admin'), function(req, res) {
@@ -242,6 +262,20 @@ app.post('/api/products/:id/images', upload.single('image'), requireRole('admin'
   var url = '/uploads/' + req.file.filename;
   dbRun("INSERT INTO product_images (product_id,image_url) VALUES (" + req.params.id + ",'" + url + "')");
   res.json({ success: true, image_url: url, id: getLastId() });
+});
+// 主产品封面图上传
+app.post('/api/products/:id/cover', upload.single('image'), requireRole('admin','clerk'), function(req, res) {
+  if (!req.file) return res.json({ success: false, msg: '请选择图片' });
+  var url = '/uploads/' + req.file.filename;
+  dbRun("UPDATE products SET image_url='" + url + "' WHERE id=" + req.params.id);
+  res.json({ success: true, image_url: url });
+});
+// 子产品图片上传
+app.post('/api/product-children/:id/image', upload.single('image'), requireRole('admin','clerk'), function(req, res) {
+  if (!req.file) return res.json({ success: false, msg: '请选择图片' });
+  var url = '/uploads/' + req.file.filename;
+  dbRun("UPDATE product_children SET image_url='" + url + "' WHERE id=" + req.params.id);
+  res.json({ success: true, image_url: url });
 });
 app.delete('/api/product-images/:id', requireRole('admin','clerk'), function(req, res) {
   var img = rowToObject(dbQuery("SELECT * FROM product_images WHERE id=" + req.params.id));
@@ -294,6 +328,7 @@ app.get('/api/orders', requireLogin, function(req, res) {
   var orders = rowsToObjects(dbQuery(sql));
   orders.forEach(function(o) {
     o.accessories = rowsToObjects(dbQuery("SELECT pa.name,pa.id as accessory_id,IFNULL(ai.stock_qty,0) as stock_qty FROM product_accessories pa LEFT JOIN accessory_inventory ai ON pa.id=ai.accessory_id WHERE pa.product_id=" + o.product_id));
+    o.product_children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + o.product_id + " ORDER BY sort_order"));
   });
   res.json(orders);
 });
@@ -301,8 +336,10 @@ app.get('/api/orders', requireLogin, function(req, res) {
 // 订单详情
 app.get('/api/orders/:id', requireLogin, function(req, res) {
   var oid = safeNum(req.params.id);
-  var order = rowToObject(dbQuery("SELECT o.*,c.name as customer_name,p.name as product_name,p.items_per_box FROM orders o LEFT JOIN customers c ON o.customer_id=c.id LEFT JOIN products p ON o.product_id=p.id WHERE o.id=" + oid));
+  var order = rowToObject(dbQuery("SELECT o.*,c.name as customer_name,p.name as product_name,p.items_per_box,p.inner_pack_spec,p.inner_pack_qty,p.outer_pack_spec,p.image_url FROM orders o LEFT JOIN customers c ON o.customer_id=c.id LEFT JOIN products p ON o.product_id=p.id WHERE o.id=" + oid));
   if (!order) return res.status(404).json({ error: '订单不存在' });
+  order.product_children = rowsToObjects(dbQuery("SELECT * FROM product_children WHERE product_id=" + order.product_id + " ORDER BY sort_order"));
+  order.product_images = rowsToObjects(dbQuery("SELECT * FROM product_images WHERE product_id=" + order.product_id + " ORDER BY sort_order"));
   res.json(order);
 });
 
@@ -326,6 +363,24 @@ app.post('/api/orders', requireRole('clerk','admin'), function(req, res) {
       deductMsg += acc.name + ': 抵扣' + deduct + '个, 剩余' + remain + '个; ';
     }
   });
+
+  // 内包材库存自动对冲扣减
+  var innerPack = rowToObject(dbQuery("SELECT inner_pack_qty,inner_pack_spec FROM products WHERE id=" + safeNum(b.product_id)));
+  if (innerPack && innerPack.inner_pack_qty > 0) {
+    var needTotal = safeNum(b.quantity) * innerPack.inner_pack_qty;
+    var ims = rowsToObjects(dbQuery("SELECT * FROM inner_pack_materials WHERE stock_qty > 0 ORDER BY id"));
+    var remaining = needTotal;
+    ims.forEach(function(im) {
+      if (remaining <= 0) return;
+      var deduct = Math.min(im.stock_qty, remaining);
+      var newStock = im.stock_qty - deduct;
+      dbRun("UPDATE inner_pack_materials SET stock_qty=" + newStock + " WHERE id=" + im.id);
+      dbRun("INSERT INTO inner_pack_issues (material_id,quantity,issued_by) VALUES (" + im.id + "," + deduct + "," + req.session.user.id + ")");
+      deductMsg += '内包材' + im.name + ': 抵扣' + deduct + ', 剩余' + newStock + '; ';
+      remaining -= deduct;
+    });
+    if (remaining > 0) deductMsg += '⚠️内包材不足，缺少' + remaining + '个; ';
+  }
 
   addNotif('supervisor', null, 'new_order', '新订单待派单', '订单' + orderNo + '已创建. ' + deductMsg, orderId);
   addLog(req.session.user.id, 'create_order', '创建订单' + orderNo + ', ' + deductMsg, orderId);

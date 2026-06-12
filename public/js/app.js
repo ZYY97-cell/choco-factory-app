@@ -405,12 +405,14 @@ function onProductChange() {
       <h3>📦 产品信息（自动带出）</h3>
       <div class="detail-row"><span class="label">产品明细</span><span class="value">${product.details || '-'}</span></div>
       <div class="detail-row"><span class="label">产品色卡</span><span class="value"><span class="color-card-display"><span class="color-swatch" style="background:${product.color_code || '#ccc'}"></span>${product.color_code || '-'}</span></span></div>
-      <div class="detail-row"><span class="label">内包物料</span><span class="value">${product.inner_pack_spec || '-'}</span></div>
+      <div class="detail-row"><span class="label">内包物料</span><span class="value">${product.inner_pack_spec || '-'} ×${product.inner_pack_qty||1}/件</span></div>
       <div class="detail-row"><span class="label">外包物料</span><span class="value">${product.outer_pack_spec || '-'}</span></div>
-      ${product.items && product.items.length ? `
-        <div style="margin-top:8px"><strong style="font-size:12px;color:var(--text-secondary)">生产项目明细：</strong></div>
-        ${product.items.map(it => `<div style="padding:2px 0;font-size:13px">• ${it.name}</div>`).join('')}
+      ${(product.children||[]).length ? `
+        <div style="margin-top:8px"><strong style="font-size:12px;color:var(--accent)">📦 子产品组合：</strong></div>
+        ${product.children.map(function(ch){ return '<div style="padding:2px 0;font-size:13px">• '+ch.name+' ×'+ch.quantity+'</div>'; }).join('')}
       ` : ''}
+      ${product.image_url ? '<img src="'+product.image_url+'" style="max-width:200px;margin-top:8px;border-radius:8px">' : ''}
+      ${(product.images||[]).map(function(im){ return '<img src="'+im.image_url+'" style="max-width:120px;margin:4px;border-radius:6px;display:inline-block">'; }).join('')}
     </div>`;
 }
 
@@ -428,7 +430,8 @@ async function submitNewOrder() {
   
   const res = await API.post('/api/orders', { customer_id, product_id, quantity, deadline, is_urgent, notes });
   if (res.success) {
-    showToast(`订单 ${res.order_no} 创建成功！`, 'success');
+    showToast('订单 ' + res.order_no + ' 创建成功！', 'success');
+    if (res.deduction_msg) setTimeout(function(){ alert('库存扣减：\n' + res.deduction_msg); }, 500);
     navigate('clerk-orders');
   } else {
     showToast(res.msg || '创建失败', 'error');
@@ -694,6 +697,8 @@ async function renderTeamProduce() {
         <div class="detail-row"><span class="label">客户</span><span class="value">${order.customer_name}</span></div>
         <div class="detail-row"><span class="label">产品</span><span class="value">${order.product_name}</span></div>
         <div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:700;color:var(--primary)">${order.quantity}</span></div>
+        ${order.image_url ? '<img src="'+order.image_url+'" style="max-width:200px;margin-top:6px;border-radius:8px">' : ''}
+        ${(order.product_children||[]).length ? '<div style="margin-top:8px;font-size:13px;color:var(--accent)"><strong>子产品组合：</strong>'+order.product_children.map(function(c){return c.name+'×'+c.quantity}).join(' / ')+'</div>' : ''}
       </div>
       <div class="detail-section">
         <h3>👷 选择当班人员</h3>
@@ -879,6 +884,7 @@ async function renderQCInspect() {
         <div class="detail-row"><span class="label">客户</span><span class="value">${order.customer_name}</span></div>
         <div class="detail-row"><span class="label">产品</span><span class="value">${order.product_name}</span></div>
         <div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:700;color:var(--primary)">${order.quantity}</span></div>
+        ${(order.product_children||[]).length ? '<div style="margin-top:8px;font-size:13px;color:var(--accent)"><strong>子产品组合：</strong>'+order.product_children.map(function(c){return c.name+'×'+c.quantity}).join(' / ')+'</div>' : ''}
       </div>
       
       <div class="detail-section">
@@ -1032,8 +1038,10 @@ async function renderPackComplete() {
         <h3>📋 订单信息</h3>
         <div class="detail-row"><span class="label">单号</span><span class="value">${order.order_no}</span></div>
         <div class="detail-row"><span class="label">客户</span><span class="value">${order.customer_name}</span></div>
+        <div class="detail-row"><span class="label">产品</span><span class="value">${order.product_name}</span></div>
         <div class="detail-row"><span class="label">内包物料</span><span class="value">${order.inner_pack_spec}</span></div>
         <div class="detail-row"><span class="label">外包物料</span><span class="value">${order.outer_pack_spec}</span></div>
+        ${(order.product_children||[]).length ? '<div style="margin-top:8px;font-size:13px;color:var(--accent)"><strong>子产品组合：</strong>'+order.product_children.map(function(c){return c.name+'×'+c.quantity}).join(' / ')+'</div>' : ''}
       </div>
       <div class="card">
         <div class="form-group">
@@ -1411,10 +1419,21 @@ async function renderAdmin() {
         <h3>📦 产品档案</h3>
         ${products.map(p => `
           <div class="admin-item">
-            <div><span class="item-name">${p.name}</span>
-            <div style="font-size:12px;color:var(--text-secondary)">色卡: ${p.color_code||'-'} | 内包: ${p.inner_pack_spec||'-'} | 外包: ${p.outer_pack_spec||'-'}</div></div>
+            <div>
+              <span class="item-name">${p.name}</span>
+              ${p.image_url ? `<img src="${p.image_url}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-left:6px">` : ''}
+              <div style="font-size:12px;color:var(--text-secondary)">色卡: ${p.color_code||'-'} | 内包: ${p.inner_pack_spec||'-'}/${p.inner_pack_qty||1}个 | 外包: ${p.outer_pack_spec||'-'}</div>
+              ${(p.children||[]).length ? '<div style="font-size:11px;color:var(--accent);margin-top:2px">子产品: '+p.children.map(function(c){return c.name+'×'+c.quantity}).join(' / ')+'</div>' : ''}
+            </div>
+            <div class="item-actions">
+              <button class="btn btn-outline btn-sm" onclick="editProduct(${p.id})">编辑</button>
+            </div>
           </div>
         `).join('')}
+        <div style="margin-top:8px;display:flex;gap:6px">
+          <input class="form-input" id="inp-new-product" placeholder="产品名称" style="flex:1">
+          <button class="btn btn-primary btn-sm" onclick="addProduct()">添加</button>
+        </div>
       </div>
       <div class="admin-section">
         <h3>🏭 生产班组</h3>
@@ -1474,6 +1493,83 @@ async function importCustomers() {
   var res = await resp.json();
   if (res.success) { showToast(res.msg || '导入成功', 'success'); navigate('admin'); }
   else showToast(res.msg || '导入失败', 'error');
+}
+// ===== 产品编辑 =====
+var _editProdChildren = [];
+async function addProduct() {
+  var name = document.getElementById('inp-new-product').value.trim();
+  if (!name) return showToast('请输入产品名称', 'error');
+  await API.post('/api/products', { name: name, customer_id: 1, inner_pack_qty: 1 });
+  showToast('产品已添加', 'success'); navigate('admin');
+}
+async function editProduct(id) {
+  var prod = await API.get('/api/products/' + id);
+  var customers = await API.get('/api/customers');
+  _editProdChildren = prod.children || [];
+  
+  var h = '<div class="modal-overlay"><div class="modal-content"><div class="modal-header"><h3>编辑产品</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>' +
+    '<div class="form-group"><label>客户</label><select class="form-input" id="ep-customer">' + customers.map(function(c){ return '<option value="'+c.id+'"'+(c.id===prod.customer_id?' selected':'')+'>'+c.name+'</option>'; }).join('') + '</select></div>' +
+    '<div class="form-group"><label>产品名称</label><input class="form-input" id="ep-name" value="' + (prod.name||'') + '"></div>' +
+    '<div class="form-group"><label>色卡编号</label><input class="form-input" id="ep-color" value="' + (prod.color_code||'') + '"></div>' +
+    '<div class="form-group"><label>内包规格</label><input class="form-input" id="ep-inner-spec" value="' + (prod.inner_pack_spec||'') + '"></div>' +
+    '<div class="form-group"><label>每单位内包材数量</label><input class="form-input" id="ep-inner-qty" type="number" min="1" value="' + (prod.inner_pack_qty||1) + '"></div>' +
+    '<div class="form-group"><label>外包规格</label><input class="form-input" id="ep-outer-spec" value="' + (prod.outer_pack_spec||'') + '"></div>' +
+    '<div class="form-group"><label>产品图片</label><input type="file" id="ep-image" accept="image/*">' + (prod.image_url?'<img src="'+prod.image_url+'" style="width:80px;margin-top:6px;border-radius:8px">':'') + '</div>' +
+    '<div style="margin-top:12px;font-weight:700;font-size:14px">子产品组合</div>' +
+    '<div id="ep-children">' + _editProdChildren.map(function(ch,i){ return '<div class="prep-item-row" style="display:flex;gap:6px;margin-bottom:4px"><input class="form-input" style="flex:2" placeholder="子产品名" value="'+(ch.name||'')+'"><input class="form-input" style="width:70px" type="number" min="1" value="'+(ch.quantity||1)+'"><input type="file" accept="image/*" style="width:80px;font-size:11px">'+ (ch.image_url?'<img src="'+ch.image_url+'" style="width:30px;height:30px;object-fit:cover;border-radius:4px">':'') +'</div>'; }).join('') + '</div>' +
+    '<button class="btn btn-outline btn-sm" onclick="addEditChild()" style="margin-top:6px">+ 添加子产品</button>' +
+    '<div style="margin-top:16px"><button class="btn btn-primary btn-block" onclick="saveProduct('+id+')">保存</button></div></div></div>';
+  
+  document.body.insertAdjacentHTML('beforeend', h);
+  window._editProdId = id;
+}
+function addEditChild() {
+  var div = document.createElement('div');
+  div.className = 'prep-item-row';
+  div.style.cssText = 'display:flex;gap:6px;margin-bottom:4px';
+  div.innerHTML = '<input class="form-input" style="flex:2" placeholder="子产品名"><input class="form-input" style="width:70px" type="number" min="1" value="1"><input type="file" accept="image/*" style="width:80px;font-size:11px">';
+  document.getElementById('ep-children').appendChild(div);
+}
+async function saveProduct(id) {
+  var children = [], prod = await API.get('/api/products/'+id);
+  document.querySelectorAll('#ep-children .prep-item-row').forEach(function(row){
+    var inps = row.querySelectorAll('input[type=text],input:not([type])');
+    var qty = row.querySelector('input[type=number]');
+    var name = inps[0] ? inps[0].value.trim() : '';
+    if (name) children.push({ name: name, quantity: parseInt(qty?qty.value:1)||1 });
+  });
+  
+  var body = {
+    customer_id: parseInt(document.getElementById('ep-customer').value),
+    name: document.getElementById('ep-name').value.trim(),
+    color_code: document.getElementById('ep-color').value.trim(),
+    inner_pack_spec: document.getElementById('ep-inner-spec').value.trim(),
+    inner_pack_qty: parseInt(document.getElementById('ep-inner-qty').value)||1,
+    outer_pack_spec: document.getElementById('ep-outer-spec').value.trim(),
+    image_url: prod.image_url || '',
+    children: children
+  };
+  
+  var imgFile = document.getElementById('ep-image').files[0];
+  if (imgFile) {
+    var fd = new FormData(); fd.append('image', imgFile);
+    var ir = await (await fetch('/api/products/'+id+'/cover', { method:'POST', body:fd })).json();
+    if (ir.success) body.image_url = ir.image_url;
+  }
+  
+  var childRows = document.querySelectorAll('#ep-children .prep-item-row');
+  for (var i = 0; i < children.length; i++) {
+    var cf = childRows[i] ? childRows[i].querySelector('input[type=file]') : null;
+    if (cf && cf.files[0] && _editProdChildren[i]) {
+      var cfd = new FormData(); cfd.append('image', cf.files[0]);
+      var cr = await (await fetch('/api/product-children/'+_editProdChildren[i].id+'/image', { method:'POST', body:cfd })).json();
+      if (cr.success) children[i].image_url = cr.image_url;
+    }
+  }
+  
+  var res = await API.put('/api/products/'+id, body);
+  if (res.success) { showToast('产品已更新', 'success'); closeModal(); navigate('admin'); }
+  else showToast(res.msg||'更新失败', 'error');
 }
 async function addTeam() {
   const name = $('#inp-new-team').value.trim();
