@@ -851,6 +851,109 @@ function createTables() {
     );
   `);
 
+  // ===== 采购v2（全员下单简化流程） =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS procurement_orders_v2 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_no TEXT UNIQUE NOT NULL,
+      applicant_id INTEGER NOT NULL,
+      applicant_name TEXT,
+      applicant_role TEXT,
+      item_name TEXT NOT NULL,
+      item_spec TEXT,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      supplier_name TEXT,
+      estimated_price REAL,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','ordered','arrived','delivered','re_procure','cancelled')),
+      ordered_at DATETIME,
+      ordered_by INTEGER,
+      ordered_record_url TEXT,
+      expected_arrival TEXT,
+      arrived_at DATETIME,
+      arrived_qty INTEGER,
+      arrived_photos TEXT,
+      arrived_notes TEXT,
+      delivered_at DATETIME,
+      delivered_by INTEGER,
+      cancel_reason TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (applicant_id) REFERENCES users(id)
+    );
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS procurement_logs_v2 (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      operator_id INTEGER,
+      operator_name TEXT,
+      operator_role TEXT,
+      action TEXT NOT NULL,
+      detail TEXT,
+      old_status TEXT,
+      new_status TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (order_id) REFERENCES procurement_orders_v2(id)
+    );
+  `);
+
+  // ===== 品控报告（三类：原料验收/生产过程/成品出厂） =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS qc_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      report_no TEXT UNIQUE NOT NULL,
+      report_type TEXT NOT NULL CHECK(report_type IN ('raw_material','production','finished')),
+      title TEXT NOT NULL,
+      target_name TEXT,
+      batch_no TEXT,
+      inspector_id INTEGER,
+      inspector_name TEXT,
+      report_date TEXT,
+      sample_qty INTEGER,
+      qualified_qty INTEGER DEFAULT 0,
+      unqualified_qty INTEGER DEFAULT 0,
+      conclusion TEXT CHECK(conclusion IN ('pass','fail','conditional')),
+      images TEXT,
+      detail TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (inspector_id) REFERENCES users(id)
+    );
+  `);
+
+  // ===== 品控卫生检查 =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS qc_hygiene_checks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      check_no TEXT UNIQUE NOT NULL,
+      check_type TEXT NOT NULL CHECK(check_type IN ('personal','equipment','environment','raw_material')),
+      check_area TEXT,
+      inspector_id INTEGER,
+      inspector_name TEXT,
+      check_date TEXT,
+      total_score INTEGER DEFAULT 100,
+      deduction_details TEXT,
+      notes TEXT,
+      status TEXT DEFAULT 'completed' CHECK(status IN ('pending','completed')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (inspector_id) REFERENCES users(id)
+    );
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS qc_hygiene_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      check_id INTEGER NOT NULL,
+      photo_url TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      FOREIGN KEY (check_id) REFERENCES qc_hygiene_checks(id)
+    );
+  `);
+
+  // 扩展 notifications 表
+  try { db.run("ALTER TABLE notifications ADD COLUMN link_type TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE notifications ADD COLUMN link_id INTEGER"); } catch(e) {}
+
   // ===== 配料管理 =====
   db.run(`
     CREATE TABLE IF NOT EXISTS preparations (
@@ -911,6 +1014,12 @@ function createTables() {
   db.run("CREATE INDEX IF NOT EXISTS idx_supplier_certs_supplier ON supplier_certificates(supplier_id)");
   db.run("CREATE INDEX IF NOT EXISTS idx_inbound_records_type ON inbound_records(warehouse_type)");
   db.run("CREATE INDEX IF NOT EXISTS idx_wage_records_order ON wage_records(order_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_proc_v2_status ON procurement_orders_v2(status)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_proc_v2_applicant ON procurement_orders_v2(applicant_id)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_qc_reports_type ON qc_reports(report_type)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_qc_checks_type ON qc_hygiene_checks(check_type)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_qc_checks_date ON qc_hygiene_checks(check_date)");
+  db.run("CREATE INDEX IF NOT EXISTS idx_notifications_link ON notifications(link_type, link_id)");
 }
 
 function seedData() {

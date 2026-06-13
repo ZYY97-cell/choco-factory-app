@@ -130,6 +130,17 @@ function navigate(page) {
     case 'notifications': renderNotifications(); break;
     case 'stats': renderStats(); break;
     case 'admin': renderAdmin(); break;
+    // ===== 采购v2 =====
+    case 'procurement-v2-list': renderProcurementV2List(); break;
+    case 'procurement-v2-new': renderProcurementV2New(); break;
+    case 'procurement-v2-detail': renderProcurementV2Detail(); break;
+    // ===== 品控模块 =====
+    case 'qc-reports': renderQcReports(); break;
+    case 'qc-report-edit': renderQcReportEdit(); break;
+    case 'qc-checks': renderQcChecks(); break;
+    case 'qc-check-new': renderQcCheckNew(); break;
+    case 'qc-performance': renderQcPerformance(); break;
+    case 'qc-outbound': renderQcOutbound(); break;
     default: renderDashboard(); break;
   }
 }
@@ -199,7 +210,7 @@ async function renderDashboard() {
     clerk: [
       { id: 'clerk-orders', icon: '📋', label: '订单管理' },
       { id: 'clerk-new', icon: '➕', label: '新建订单' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购申请' },
       { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
@@ -208,40 +219,37 @@ async function renderDashboard() {
       { id: 'supervisor-pending', icon: '📥', label: '待派单' },
       { id: 'supervisor-stats', icon: '📊', label: '统计' },
       { id: 'supervisor-requisition', icon: '📋', label: '领料' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
-      { id: 'my-purchases', icon: '📝', label: '我的采购' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购申请' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📈', label: '数据' }
     ],
     team: [
       { id: 'team-list', icon: '🏭', label: '待生产' },
       { id: 'team-rework', icon: '🔄', label: '补产' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
-      { id: 'my-purchases', icon: '📝', label: '我的采购' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购申请' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
     qc: [
       { id: 'qc-list', icon: '🔍', label: '待质检' },
-      { id: 'qc-requisition', icon: '📋', label: '领料' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
-      { id: 'my-purchases', icon: '📝', label: '我的采购' },
-      { id: 'notifications', icon: '🔔', label: '消息' },
-      { id: 'stats', icon: '📊', label: '统计' }
+      { id: 'qc-reports', icon: '📋', label: '品控报告' },
+      { id: 'qc-checks', icon: '🧼', label: '卫生检查' },
+      { id: 'qc-performance', icon: '📈', label: '绩效考核' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购申请' },
+      { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     packaging: [
       { id: 'pack-list', icon: '📦', label: '待打包' },
       { id: 'pack-requisition', icon: '📋', label: '领料' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
-      { id: 'my-purchases', icon: '📝', label: '我的采购' },
+      { id: 'qc-reports', icon: '📋', label: '品控报告' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购申请' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
     console: [
       { id: 'console-overview', icon: '🖥️', label: '总台总览' },
       { id: 'console-orders', icon: '📋', label: '全部订单' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
-      { id: 'my-purchases', icon: '📝', label: '我的采购' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购申请' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '数据统计' }
     ],
@@ -249,13 +257,13 @@ async function renderDashboard() {
       { id: 'finance-overview', icon: '💰', label: '财务总览' },
       { id: 'finance-wages', icon: '💵', label: '工资核算' },
       { id: 'finance-prices', icon: '🏷️', label: '计件工价' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
-      { id: 'my-purchases', icon: '📝', label: '我的采购' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购申请' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     warehouse: [
       { id: 'warehouse-procurement', icon: '📋', label: '采购处理' },
-      { id: 'purchase-list', icon: '📊', label: '采购审批' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购v2' },
+      { id: 'qc-reports', icon: '📋', label: '品控报告' },
       { id: 'warehouse-suppliers', icon: '🏢', label: '供应商' },
       { id: 'warehouse-materials', icon: '🧈', label: '原材料' },
       { id: 'warehouse-inner', icon: '📥', label: '内包材' },
@@ -266,28 +274,26 @@ async function renderDashboard() {
       { id: 'warehouse-inbound', icon: '📥', label: '入库' },
       { id: 'warehouse-receiving', icon: '📦', label: '到货' },
       { id: 'warehouse-ledger', icon: '📒', label: '台账' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
-      { id: 'my-purchases', icon: '📝', label: '我的采购' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'stats', icon: '📊', label: '统计' }
     ],
     procurement: [
       { id: 'warehouse-procurement', icon: '📋', label: '采购处理' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购v2' },
       { id: 'purchase-list', icon: '📊', label: '申请列表' },
       { id: 'warehouse-suppliers', icon: '🏢', label: '供应商' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     preparation: [
       { id: 'preparation-list', icon: '🧪', label: '配料记录' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
-      { id: 'my-purchases', icon: '📝', label: '我的采购' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购申请' },
       { id: 'notifications', icon: '🔔', label: '消息' }
     ],
     admin: [
       { id: 'admin', icon: '⚙️', label: '管理' },
+      { id: 'procurement-v2-list', icon: '🛒', label: '采购v2' },
+      { id: 'qc-reports', icon: '📋', label: '品控报告' },
       { id: 'purchase-list', icon: '📊', label: '采购审批' },
-      { id: 'purchase-request', icon: '🛒', label: '采购申请' },
       { id: 'stats', icon: '📊', label: '统计' },
       { id: 'notifications', icon: '🔔', label: '消息' },
       { id: 'clerk-orders', icon: '📋', label: '全部订单' }

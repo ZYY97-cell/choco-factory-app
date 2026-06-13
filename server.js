@@ -6,6 +6,7 @@ const fs = require('fs');
 
 const { initDatabase, getDb, saveDatabase } = require('./db.js');
 let db = null;
+var setupRoutesV2 = require('./routes_v2');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -74,12 +75,30 @@ function requireRole() {
   };
 }
 
+// 品控报告查看权限：外包/仓库/文员/管理员/品控 可查看
+function canViewQcReports(req, res, next) {
+  if (!req.session.user) return res.status(401).json({ error: '请先登录' });
+  var r = req.session.user.role;
+  if (['qc','packaging','warehouse','clerk','admin'].indexOf(r) !== -1) return next();
+  res.status(403).json({ error: '权限不足' });
+}
+
+// 清理旧采购数据（保留最近30天）
+function cleanupOldProcurementData() {
+  var cutoff = new Date(Date.now() - 30*86400000).toISOString().slice(0,10);
+  try {
+    dbRun("DELETE FROM procurement_orders_v2 WHERE created_at < '" + cutoff + "' AND status IN ('delivered','cancelled')");
+  } catch(e) {}
+}
+
 // ===== 通知 =====
-function addNotif(role, uid, type, title, content, oid) {
+function addNotif(role, uid, type, title, content, oid, linkType, linkId) {
   var rc = role ? ("'" + role + "'") : 'NULL';
   var uc = uid ? String(uid) : 'NULL';
   var oc = oid ? String(oid) : 'NULL';
-  dbRun("INSERT INTO notifications (user_id,role,type,title,content,order_id) VALUES (" + uc + "," + rc + ",'" + safe(type) + "','" + safe(title) + "','" + safe(content) + "'," + oc + ")");
+  var lt = linkType ? ("'" + safe(linkType) + "'") : 'NULL';
+  var li = linkId ? String(linkId) : 'NULL';
+  dbRun("INSERT INTO notifications (user_id,role,type,title,content,order_id,link_type,link_id) VALUES (" + uc + "," + rc + ",'" + safe(type) + "','" + safe(title) + "','" + safe(content) + "'," + oc + "," + lt + "," + li + ")");
 }
 function addLog(uid, action, detail, oid) {
   var u = uid || 'NULL', o = oid || 'NULL';
@@ -1688,6 +1707,8 @@ app.get('{*any}', function(req, res) {
 // 启动
 async function start() {
   db = await initDatabase();
+  // 注册 v2 路由（采购v2 + 品控）
+  setupRoutesV2(app, db, dbRun, dbQuery, rowsToObjects, safe, addNotif, requireLogin, requireRole, canViewQcReports, upload, cleanupOldProcurementData);
   console.log('巧克力工厂生产管控系统启动！');
   console.log('本机: http://localhost:' + PORT);
   var os = require('os');
