@@ -253,6 +253,119 @@ module.exports = function(app, db, dbRun, dbQuery, rowsToObjects, safe, addNotif
     res.json({ success: true });
   });
 
+  // ============================================================
+  // 产品Excel批量导入
+  // ============================================================
+
+  app.post('/api/products/import', requireRole('admin','clerk'), upload.single('file'), function(req, res) {
+    if (!req.file) return res.json({ success: false, msg: '请上传文件' });
+    try {
+      var XLSX = require('xlsx');
+      var wb = XLSX.readFile(req.file.path);
+      var sheet = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      // 表头校验（第0行）
+      var header = rows[0] || [];
+      var expected = ['产品名称','产品明细','明细数量','色号','内包规格','包装袋尺寸','内包数量','外包规格','外箱尺寸规格','打包方式','外箱尺寸'];
+      var count = 0, skipped = 0, errors = [];
+      // 获取客户列表（用于关联 customer_id，默认用第一个客户）
+      var customers = rowsToObjects(dbQuery("SELECT id,name FROM customers LIMIT 10"));
+      var defaultCid = customers.length > 0 ? customers[0].id : 1;
+      for (var i = 1; i < rows.length; i++) {
+        var r = rows[i];
+        var name = (r[0]||'').toString().trim();
+        if (!name) { skipped++; continue; }
+        var childName = (r[1]||'').toString().trim();
+        var childQty = parseInt(r[2]) || 1;
+        var colorCode = (r[3]||'').toString().trim();
+        var innerSpec = (r[4]||'').toString().trim();
+        var innerSize = (r[5]||'').toString().trim();
+        var innerQty = parseInt(r[6]) || 1;
+        var outerSpec = (r[7]||'').toString().trim();
+        var outerSize = (r[8]||'').toString().trim();
+        var packingMethod = (r[9]||'').toString().trim();
+        var outerBoxSize = (r[10]||'').toString().trim();
+        // 插入产品
+        dbRun("INSERT INTO products (customer_id,name,color_code,inner_pack_spec,inner_pack_size,inner_pack_qty,outer_pack_spec,outer_box_size,packing_method) VALUES (" + defaultCid + ",'" + safe(name) + "','" + safe(colorCode) + "','" + safe(innerSpec) + "','" + safe(innerSize) + "'," + innerQty + ",'" + safe(outerSpec) + "','" + safe(outerSize) + "','" + safe(packingMethod) + "')");
+        var pid = db.prepare("SELECT last_insert_rowid() as id").get().id;
+        // 插入子产品
+        if (childName) {
+          dbRun("INSERT INTO product_children (product_id,name,quantity) VALUES (" + pid + ",'" + safe(childName) + "'," + childQty + ")");
+        }
+        count++;
+      }
+      try { require('fs').unlinkSync(req.file.path); } catch(e) {}
+      res.json({ success: true, count: count, skipped: skipped, msg: '成功导入 '+count+' 个产品'+(skipped>0?'，跳过 '+skipped+' 行':'') });
+    } catch(e) {
+      try { require('fs').unlinkSync(req.file.path); } catch(ex) {}
+      res.json({ success: false, msg: '解析失败：' + e.message });
+    }
+  });
+
+  // ============================================================
+  // 班组管理（补充缺失的API）
+  // ============================================================
+
+  // 添加班组
+  app.post('/api/teams', requireRole('admin'), function(req, res) {
+    var name = (req.body.name||'').toString().trim();
+    if (!name) return res.json({ success: false, msg: '班组名称不能为空' });
+    dbRun("INSERT INTO teams (name) VALUES ('" + safe(name) + "')");
+    res.json({ success: true, id: db.prepare("SELECT last_insert_rowid() as id").get().id });
+  });
+
+  // 删除班组
+  app.delete('/api/teams/:id', requireRole('admin'), function(req, res) {
+    var tid = req.params.id;
+    // 检查是否有成员
+    var members = rowsToObjects(dbQuery("SELECT id FROM team_members WHERE team_id=" + tid));
+    if (members.length > 0) return res.json({ success: false, msg: '请先删除该班组的所有成员' });
+    dbRun("DELETE FROM teams WHERE id=" + tid);
+    res.json({ success: true });
+  });
+
+  // 添加班组成员
+  app.post('/api/teams/:id/members', requireRole('admin'), function(req, res) {
+    var tid = req.params.id;
+    var name = (req.body.name||'').toString().trim();
+    var phone = (req.body.phone||'').toString().trim();
+    var position = (req.body.position||'').toString().trim();
+    if (!name) return res.json({ success: false, msg: '成员姓名不能为空' });
+    dbRun("INSERT INTO team_members (team_id,name,phone,position,status) VALUES (" + tid + ",'" + safe(name) + "','" + safe(phone) + "','" + safe(position) + "','active')");
+    res.json({ success: true, id: db.prepare("SELECT last_insert_rowid() as id").get().id });
+  });
+
+  // 获取班组成员（支持按 status 筛选）
+  app.get('/api/team-members', requireLogin, function(req, res) {
+    var sql = "SELECT tm.*, t.name as team_name FROM team_members tm LEFT JOIN teams t ON tm.team_id=t.id WHERE 1=1";
+    if (req.query.team_id) sql += " AND tm.team_id=" + safeNum(req.query.team_id);
+    if (req.query.status) sql += " AND tm.status='" + safe(req.query.status) + "'";
+    sql += " ORDER BY tm.team_id, tm.id";
+    var rows = rowsToObjects(dbQuery(sql));
+    res.json({ success: true, members: rows });
+  });
+
+  // 编辑班组成员
+  app.put('/api/team-members/:id', requireRole('admin'), function(req, res) {
+    var id = req.params.id;
+    var b = req.body;
+    var sets = [];
+    if (b.name !== undefined) sets.push("name='" + safe(b.name) + "'");
+    if (b.phone !== undefined) sets.push("phone='" + safe(b.phone) + "'");
+    if (b.position !== undefined) sets.push("position='" + safe(b.position) + "'");
+    if (b.status !== undefined) sets.push("status='" + safe(b.status) + "'");
+    if (b.team_id !== undefined) sets.push("team_id=" + safeNum(b.team_id));
+    if (sets.length === 0) return res.json({ success: false, msg: '无更新内容' });
+    dbRun("UPDATE team_members SET " + sets.join(',') + " WHERE id=" + id);
+    res.json({ success: true });
+  });
+
+  // 删除班组成员
+  app.delete('/api/team-members/:id', requireRole('admin'), function(req, res) {
+    dbRun("DELETE FROM team_members WHERE id=" + req.params.id);
+    res.json({ success: true });
+  });
+
   // 清理旧采购数据（启动时执行一次）
   try { cleanupOldProcurementData(); } catch(e) {}
 

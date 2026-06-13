@@ -252,9 +252,8 @@ app.get('/api/products/:id', requireLogin, function(req, res) {
 });
 app.post('/api/products', requireRole('admin','clerk'), function(req, res) {
   var b = req.body;
-  dbRun("INSERT INTO products (customer_id,name,details,color_code,image_url,inner_pack_spec,inner_pack_qty,outer_pack_spec,items_per_box) VALUES (" + safeNum(b.customer_id) + ",'" + safe(b.name) + "','" + safe(b.details||'') + "','" + safe(b.color_code||'') + "','" + safe(b.image_url||'') + "','" + safe(b.inner_pack_spec||'') + "'," + safeNum(b.inner_pack_qty,1) + ",'" + safe(b.outer_pack_spec||'') + "'," + safeNum(b.items_per_box,0) + ")");
+  dbRun("INSERT INTO products (customer_id,name,details,color_code,image_url,inner_pack_spec,inner_pack_qty,outer_pack_spec,items_per_box,inner_pack_size,outer_box_size,packing_method) VALUES (" + safeNum(b.customer_id) + ",'" + safe(b.name) + "','" + safe(b.details||'') + "','" + safe(b.color_code||'') + "','" + safe(b.image_url||'') + "','" + safe(b.inner_pack_spec||'') + "'," + safeNum(b.inner_pack_qty,1) + ",'" + safe(b.outer_pack_spec||'') + "'," + safeNum(b.items_per_box,0) + ",'" + safe(b.inner_pack_size||'') + "','" + safe(b.outer_box_size||'') + "','" + safe(b.packing_method||'') + ")");
   var pid = getLastId('products');
-  // 子产品
   (b.children||[]).forEach(function(ch, i) {
     if (ch.name) dbRun("INSERT INTO product_children (product_id,name,quantity,image_url,sort_order) VALUES (" + pid + ",'" + safe(ch.name) + "'," + safeNum(ch.quantity,1) + ",'" + safe(ch.image_url||'') + "'," + i + ")");
   });
@@ -262,7 +261,7 @@ app.post('/api/products', requireRole('admin','clerk'), function(req, res) {
 });
 app.put('/api/products/:id', requireRole('admin','clerk'), function(req, res) {
   var b = req.body;
-  dbRun("UPDATE products SET customer_id=" + safeNum(b.customer_id) + ",name='" + safe(b.name) + "',details='" + safe(b.details||'') + "',color_code='" + safe(b.color_code||'') + "',image_url='" + safe(b.image_url||'') + "',inner_pack_spec='" + safe(b.inner_pack_spec||'') + "',inner_pack_qty=" + safeNum(b.inner_pack_qty,1) + ",outer_pack_spec='" + safe(b.outer_pack_spec||'') + "',items_per_box=" + safeNum(b.items_per_box,0) + " WHERE id=" + req.params.id);
+  dbRun("UPDATE products SET customer_id=" + safeNum(b.customer_id) + ",name='" + safe(b.name) + "',details='" + safe(b.details||'') + "',color_code='" + safe(b.color_code||'') + "',image_url='" + safe(b.image_url||'') + "',inner_pack_spec='" + safe(b.inner_pack_spec||'') + "',inner_pack_qty=" + safeNum(b.inner_pack_qty,1) + ",outer_pack_spec='" + safe(b.outer_pack_spec||'') + "',items_per_box=" + safeNum(b.items_per_box,0) + ",inner_pack_size='" + safe(b.inner_pack_size||'') + "',outer_box_size='" + safe(b.outer_box_size||'') + "',packing_method='" + safe(b.packing_method||'') + "' WHERE id=" + req.params.id);
   // 子产品：删除旧的，插入新的
   dbRun("DELETE FROM product_children WHERE product_id=" + req.params.id);
   (b.children||[]).forEach(function(ch, i) {

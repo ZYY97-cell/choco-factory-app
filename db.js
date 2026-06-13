@@ -57,6 +57,9 @@ function createTables() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       team_id INTEGER NOT NULL,
       name TEXT NOT NULL,
+      phone TEXT,
+      position TEXT,
+      status TEXT DEFAULT 'active' CHECK(status IN ('active','inactive')),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (team_id) REFERENCES teams(id)
     );
@@ -87,6 +90,9 @@ function createTables() {
       inner_pack_qty INTEGER DEFAULT 1,
       outer_pack_spec TEXT,
       items_per_box INTEGER DEFAULT 1,
+      inner_pack_size TEXT,
+      outer_box_size TEXT,
+      packing_method TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (customer_id) REFERENCES customers(id)
     );
@@ -953,6 +959,16 @@ function createTables() {
   // 扩展 notifications 表
   try { db.run("ALTER TABLE notifications ADD COLUMN link_type TEXT"); } catch(e) {}
   try { db.run("ALTER TABLE notifications ADD COLUMN link_id INTEGER"); } catch(e) {}
+
+  // 扩展 products 表（产品Excel导入字段）
+  try { db.run("ALTER TABLE products ADD COLUMN inner_pack_size TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE products ADD COLUMN outer_box_size TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE products ADD COLUMN packing_method TEXT"); } catch(e) {}
+
+  // 扩展 team_members 表（人员管理优化）
+  try { db.run("ALTER TABLE team_members ADD COLUMN phone TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE team_members ADD COLUMN position TEXT"); } catch(e) {}
+  try { db.run("ALTER TABLE team_members ADD COLUMN status TEXT DEFAULT 'active'"); } catch(e) {}
 
   // ===== 配料管理 =====
   db.run(`

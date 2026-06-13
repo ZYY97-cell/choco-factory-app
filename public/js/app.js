@@ -1980,23 +1980,38 @@ async function renderAdmin() {
         <div style="margin-top:8px;display:flex;gap:6px">
           <input class="form-input" id="inp-new-product" placeholder="产品名称" style="flex:1">
           <button class="btn btn-primary btn-sm" onclick="addProduct()">添加</button>
+          <button class="btn btn-outline btn-sm" onclick="renderProductImportModal()" style="white-space:nowrap">📦 批量导入</button>
         </div>
       </div>
       <div class="admin-section">
         <h3>🏭 生产班组</h3>
         ${teams.map(t => `
-          <div class="admin-item">
-            <div><span class="item-name">${t.name}</span>
-            <div style="font-size:12px;color:var(--text-secondary)">成员：${t.members ? t.members.map(m=>m.name).join('、') : '无'}</div></div>
-            <div class="item-actions">
-              <button class="btn btn-outline btn-sm" onclick="addTeamMember(${t.id})">+成员</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteTeam(${t.id})">删除</button>
+          <div class="admin-item" style="flex-direction:column;align-items:flex-start">
+            <div style="display:flex;width:100%;justify-content:space-between;align-items:center">
+              <span class="item-name">${t.name}</span>
+              <div class="item-actions">
+                <button class="btn btn-danger btn-sm" onclick="deleteTeam(${t.id})">删除班组</button>
+              </div>
+            </div>
+            <div style="width:100%;margin-top:6px;max-height:160px;overflow-y:auto;background:var(--bg-primary);border-radius:8px;padding:6px">
+              ${(t.members&&t.members.length>0)?t.members.map(m=>`
+                <div style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-bottom:1px solid var(--border-color);font-size:13px">
+                  <span style="flex:1;min-width:0">${m.name}</span>
+                  <span style="font-size:11px;color:var(--text-secondary)">${m.position||''}</span>
+                  <span style="font-size:11px;color:${m.status==='inactive'?'var(--danger)':'var(--success)'}">${m.status==='inactive'?'停用':'正常'}</span>
+                  <button class="btn btn-outline btn-sm" onclick="editTeamMember(${m.id},'${encodeURIComponent(m.name)}','${encodeURIComponent(m.phone||'')}','${encodeURIComponent(m.position||'')}','${m.status||'active'}',${t.id})" style="padding:2px 6px;font-size:11px">编辑</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteTeamMember(${m.id},'${m.name}')" style="padding:2px 6px;font-size:11px">删除</button>
+                </div>
+              `).join(''):'<div style="font-size:12px;color:var(--text-secondary);padding:6px">暂无成员</div>'}
+            </div>
+            <div style="margin-top:6px;display:flex;gap:6px;width:100%">
+              <button class="btn btn-outline btn-sm" onclick="addTeamMember(${t.id})">+ 添加成员</button>
             </div>
           </div>
         `).join('')}
         <div style="margin-top:8px;display:flex;gap:6px">
           <input class="form-input" id="inp-new-team" placeholder="班组名称" style="flex:1">
-          <button class="btn btn-primary btn-sm" onclick="addTeam()">添加</button>
+          <button class="btn btn-primary btn-sm" onclick="addTeam()">添加班组</button>
         </div>
       </div>
       <div class="admin-section">
