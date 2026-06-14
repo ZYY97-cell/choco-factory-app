@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🍫 巧克力工厂 · 可视化后台</title>
+<style>
+  :root {
+    --primary: #6d4c41;
+    --primary-light: #a1887f;
+    --primary-dark: #4e342e;
+    --accent: #ff8f00;
+    --accent-light: #ffb300;
+    --bg: #fdf6f0;
+    --card: #fff;
+    --border: #e0d5cc;
+    --text: #3e2723;
+    --text2: #795548;
+    --success: #43a047;
+    --danger: #e53935;
+    --warning: #fb8c00;
+    --info: #1e88e5;
+    --sidebar-w: 220px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, 'PingFang SC', sans-serif; background: var(--bg); color: var(--text); }
+
+  /* ===== 登录页 ===== */
+  #login-screen {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #4e342e 0%, #6d4c41 50%, #a1887f 100%);
+    z-index: 1000;
+  }
+  .login-box {
+    background: #fff; border-radius: 16px; padding: 40px 48px; width: 380px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+  .login-logo { text-align: center; font-size: 48px; margin-bottom: 8px; }
+  .login-title { text-align: center; font-size: 20px; font-weight: 700; color: var(--primary-dark); margin-bottom: 4px; }
+  .login-sub { text-align: center; font-size: 13px; color: var(--text2); margin-bottom: 28px; }
+  .login-field { margin-bottom: 16px; }
+  .login-field label { display: block; font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
+  .login-field input {
+    width: 100%; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 8px;
+    font-size: 15px; outline: none; transition: border-color 0.2s;
+  }
+  .login-field input:focus { border-color: var(--primary); }
+  .login-btn {
+    width: 100%; padding: 12px; background: var(--primary); color: #fff;
+    border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: background 0.2s; margin-top: 8px;
+  }
+  .login-btn:hover { background: var(--primary-dark); }
+  .login-err { color: var(--danger); font-size: 13px; text-align: center; margin-top: 10px; }
+
+  /* ===== 主界面 ===== */
+  #main { display: none; height: 100vh; overflow: hidden; }
+  .layout { display: flex; height: 100%; }
+
+  /* 侧边栏 */
+  .sidebar {
+    width: var(--sidebar-w); background: var(--primary-dark); color: #fff;
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar-header {
+    padding: 20px 16px 16px; border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .sidebar-logo { font-size: 22px; font-weight: 700; }
+  .sidebar-logo span { font-size: 13px; opacity: 0.7; display: block; margin-top: 2px; }
+  .sidebar-nav { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    cursor: pointer; transition: background 0.15s; font-size: 14px; border-radius: 0;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.08); }
+  .nav-item.active { background: rgba(255,255,255,0.15); }
+  .nav-item .icon { width: 20px; text-align: center; font-size: 16px; }
+  .sidebar-user {
+    padding: 14px 16px; border-top: 1px solid rgba(255,255,255,0.1);
+    font-size: 13px; opacity: 0.8;
+  }
+  .logout-btn {
+    display: block; width: 100%; padding: 8px; margin-top: 8px;
+    background: rgba(255,255,255,0.1); border: none; color: #fff;
+    border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .logout-btn:hover { background: rgba(255,255,255,0.2); }
+
+  /* 主内容 */
+  .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar {
+    background: #fff; border-bottom: 1px solid var(--border); padding: 14px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .topbar-title { font-size: 18px; font-weight: 700; color: var(--primary-dark); }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .sse-status {
+    display: flex; align-items: center; gap: 6px; font-size: 12px;
+    padding: 4px 10px; border-radius: 20px; background: #f5f5f5;
+  }
+  .sse-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
+  .sse-dot.connected { background: var(--success); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .save-all-btn {
+    padding: 8px 18px; background: var(--accent); color: #fff; border: none;
+    border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .save-all-btn:hover { background: var(--accent-light); }
+
+  .content-area { flex: 1; overflow-y: auto; padding: 24px; }
+
+  /* ===== 卡片 ===== */
+  .card {
+    background: #fff; border-radius: 12px; border: 1px solid var(--border);
+    padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  .card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border);
+  }
+  .card-title { font-size: 16px; font-weight: 700; color: var(--primary-dark); }
+  .card-actions { display: flex; gap: 8px; }
+
+  /* ===== 统计卡片 ===== */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px,1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat-card {
+    background: #fff; border-radius: 10px; border: 1px solid var(--border);
+    padding: 16px; text-align: center;
+  }
+  .stat-num { font-size: 28px; font-weight: 800; color: var(--primary-dark); }
+  .stat-label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+
+  /* ===== 拖拽模块排序 ===== */
+  .role-tabs {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;
+  }
+  .role-tab {
+    padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: 2px solid var(--border); background: #fff; color: var(--text2);
+    transition: all 0.15s;
+  }
+  .role-tab.active { border-color: var(--primary); background: var(--primary); color: #fff; }
+
+  .module-list {
+    display: flex; flex-direction: column; gap: 8px; min-height: 80px;
+  }
+  .module-item {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+    background: #fff; border: 1.5px solid var(--border); border-radius: 10px;
+    cursor: grab; transition: all 0.15s; user-select: none;
+  }
+  .module-item:hover { border-color: var(--primary-light); background: #fdf0e8; }
+  .module-item.dragging { opacity: 0.4; border: 2px dashed var(--primary); }
+  .module-item.drag-over { border-color: var(--accent); background: #fff8e1; transform: scale(1.01); }
+  .module-drag-handle { color: #aaa; font-size: 18px; cursor: grab; }
+  .module-icon { font-size: 20px; width: 28px; text-align: center; }
+  .module-info { flex: 1; }
+  .module-label { font-size: 14px; font-weight: 600; }
+  .module-key { font-size: 11px; color: #aaa; margin-top: 1px; }
+  .module-sort-badge { background: var(--primary); color: #fff; border-radius: 10px; font-size: 11px; padding: 2px 8px; }
+  .toggle-switch {
+    position: relative; width: 44px; height: 24px; flex-shrink: 0;
+  }
+  .toggle-switch input { display: none; }
+  .toggle-slider {
+    position: absolute; inset: 0; background: #ccc; border-radius: 24px;
+    cursor: pointer; transition: background 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-slider { background: var(--success); }
+  .toggle-slider::before {
+    content: ''; position: absolute; width: 18px; height: 18px;
+    background: #fff; border-radius: 50%; top: 3px; left: 3px; transition: left 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-slider::before { left: 23px; }
+  .edit-label-input {
+    border: 1.5px solid var(--border); border-radius: 6px; padding: 4px 8px;
+    font-size: 13px; width: 120px; outline: none;
+  }
+  .edit-label-input:focus { border-color: var(--primary); }
+
+  /* ===== 字段配置 ===== */
+  .field-module-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .field-module-tab {
+    padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: 1.5px solid var(--border); background: #fff; color: var(--text2);
+  }
+  .field-module-tab.active { border-color: var(--info); background: var(--info); color: #fff; }
+
+  .field-list { display: flex; flex-direction: column; gap: 8px; }
+  .field-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    background: #fff; border: 1.5px solid var(--border); border-radius: 8px;
+    cursor: grab;
+  }
+  .field-item:hover { border-color: var(--info); background: #e8f4fd; }
+  .field-item.dragging { opacity: 0.4; }
+  .field-item.drag-over { border-color: var(--info); background: #fff3e0; }
+  .field-handle { color: #ccc; font-size: 16px; }
+  .field-type-badge {
+    padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600;
+    background: #e8eaf6; color: #3949ab;
+  }
+  .field-required-badge {
+    padding: 2px 6px; border-radius: 8px; font-size: 11px;
+    background: #fce4ec; color: #c62828;
+  }
+  .field-optional-badge {
+    padding: 2px 6px; border-radius: 8px; font-size: 11px;
+    background: #f3f3f3; color: #888;
+  }
+
+  /* ===== 公告 ===== */
+  .announcement-list { display: flex; flex-direction: column; gap: 8px; }
+  .announcement-item {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+    background: #fff; border: 1px solid var(--border); border-radius: 8px;
+  }
+  .ann-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .ann-status.active { background: var(--success); }
+  .ann-status.inactive { background: #ccc; }
+  .ann-info { flex: 1; }
+  .ann-title { font-size: 14px; font-weight: 600; }
+  .ann-meta { font-size: 12px; color: #aaa; margin-top: 2px; }
+
+  /* ===== 用户管理 ===== */
+  .user-table { width: 100%; border-collapse: collapse; }
+  .user-table th, .user-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .user-table th { background: #fdf6f0; font-weight: 700; color: var(--text2); }
+  .role-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+    background: #e8f5e9; color: #2e7d32;
+  }
+  .role-badge.admin { background: #fce4ec; color: #ad1457; }
+
+  /* ===== 按钮 ===== */
+  .btn {
+    padding: 6px 14px; border-radius: 7px; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: none; transition: all 0.15s;
+  }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-success { background: var(--success); color: #fff; }
+  .btn-success:hover { background: #388e3c; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: #b71c1c; }
+  .btn-outline { background: #fff; color: var(--primary); border: 1.5px solid var(--primary); }
+  .btn-outline:hover { background: #fdf0e8; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  /* ===== Toast ===== */
+  #toast {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+    background: var(--primary-dark); color: #fff; padding: 10px 24px; border-radius: 24px;
+    font-size: 14px; font-weight: 600; z-index: 9999;
+    transition: opacity 0.3s; opacity: 0; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ===== 模态框 ===== */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 500; align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: #fff; border-radius: 14px; padding: 28px; width: 480px; max-width: 95vw;
+    max-height: 85vh; overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+  .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 16px; color: var(--primary-dark); }
+  .form-row { margin-bottom: 14px; }
+  .form-row label { display: block; font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 5px; }
+  .form-row input, .form-row textarea, .form-row select {
+    width: 100%; padding: 9px 12px; border: 1.5px solid var(--border); border-radius: 7px;
+    font-size: 14px; outline: none;
+  }
+  .form-row input:focus, .form-row textarea:focus, .form-row select:focus { border-color: var(--primary); }
+  .form-row textarea { min-height: 80px; resize: vertical; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+  .section-hint { font-size: 12px; color: #aaa; margin-bottom: 12px; }
+  .drag-hint { font-size: 12px; color: var(--info); display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
+  .empty-tip { text-align: center; padding: 40px 20px; color: #aaa; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<!-- 登录页 -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">🍫</div>
+    <div class="login-title">巧克力工厂</div>
+    <div class="login-sub">可视化后台管理系统</div>
+    <div class="login-field">
+      <label>管理员账号</label>
+      <input type="text" id="login-user" placeholder="请输入账号" value="admin" />
+    </div>
+    <div class="login-field">
+      <label>密码</label>
+      <input type="password" id="login-pwd" placeholder="请输入密码" />
+    </div>
+    <button class="login-btn" onclick="doLogin()">登 录</button>
+    <div class="login-err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="main">
+  <div class="layout">
+    <!-- 侧边栏 -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">🍫 巧克力工厂<span>可视化后台</span></div>
+      </div>
+      <div class="sidebar-nav">
+        <div class="nav-item active" onclick="showPage('dashboard')" data-page="dashboard">
+          <span class="icon">📊</span> 数据总览
+        </div>
+        <div class="nav-item" onclick="showPage('modules')" data-page="modules">
+          <span class="icon">🧩</span> 模块排序
+        </div>
+        <div class="nav-item" onclick="showPage('fields')" data-page="fields">
+          <span class="icon">📝</span> 字段配置
+        </div>
+        <div class="nav-item" onclick="showPage('announcements')" data-page="announcements">
+          <span class="icon">📢</span> 公告管理
+        </div>
+        <div class="nav-item" onclick="showPage('users')" data-page="users">
+          <span class="icon">👤</span> 用户管理
+        </div>
+      </div>
+      <div class="sidebar-user">
+        <div id="admin-name">admin</div>
+        <button class="logout-btn" onclick="doLogout()">退出登录</button>
+      </div>
+    </div>
+
+    <!-- 主内容 -->
+    <div class="main-content">
+      <div class="topbar">
+        <div class="topbar-title" id="page-title">数据总览</div>
+        <div class="topbar-right">
+          <div class="sse-status">
+            <div class="sse-dot" id="sse-dot"></div>
+            <span id="sse-status-text">未连接</span>
+          </div>
+          <button class="save-all-btn" id="save-all-btn" onclick="saveCurrentPage()" style="display:none">💾 保存配置</button>
+        </div>
+      </div>
+      <div class="content-area" id="content-area">
+        <!-- 页面内容动态渲染 -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast">提示</div>
+
+<!-- 公告新建/编辑弹窗 -->
+<div class="modal-overlay" id="ann-modal">
+  <div class="modal-box">
+    <div class="modal-title">📢 发布公告</div>
+    <div class="form-row">
+      <label>公告标题 *</label>
+      <input type="text" id="ann-title" placeholder="请输入公告标题" />
+    </div>
+    <div class="form-row">
+      <label>公告内容</label>
+      <textarea id="ann-content" placeholder="请输入详细内容..."></textarea>
+    </div>
+    <div class="form-row">
+      <label>推送目标</label>
+      <select id="ann-roles">
+        <option value="all">全部人员</option>
+        <option value="admin">管理员</option>
+        <option value="clerk">文员</option>
+        <option value="supervisor">组长</option>
+        <option value="team">生产班组</option>
+        <option value="qc">品控</option>
+        <option value="packaging">打包</option>
+        <option value="warehouse">仓库</option>
+        <option value="procurement">采购</option>
+        <option value="finance">财务</option>
+        <option value="preparation">配料</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>过期时间（可选）</label>
+      <input type="datetime-local" id="ann-expires" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeAnnModal()">取消</button>
+      <button class="btn btn-success" onclick="submitAnnouncement()">发布</button>
+    </div>
+  </div>
+</div>
+
+<!-- 重置密码弹窗 -->
+<div class="modal-overlay" id="pwd-modal">
+  <div class="modal-box">
+    <div class="modal-title">🔑 重置密码</div>
+    <div class="form-row">
+      <label>用户</label>
+      <input type="text" id="pwd-user-name" readonly style="background:#f5f5f5" />
+    </div>
+    <div class="form-row">
+      <label>新密码</label>
+      <input type="text" id="pwd-new" value="123456" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closePwdModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitResetPwd()">确认重置</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== 全局状态 =====
+var currentPage = 'dashboard';
+var currentRole = 'admin';
+var currentFieldModule = 'orders';
+var moduleData = {}; // {role: [...modules]}
+var fieldData = {}; // {module: [...fields]}
+var dragSrc = null;
+var sseConn = null;
+var pwdUserId = null;
+
+var ROLE_LABELS = {
+  admin:'管理员', clerk:'文员', supervisor:'组长', team:'生产班组',
+  qc:'品控', packaging:'打包', warehouse:'仓库', finance:'财务',
+  procurement:'采购', preparation:'配料', console:'总控'
+};
+
+var MODULE_LABELS = {
+  orders:'订单管理', products:'产品档案', customers:'客户档案',
+  teams:'班组管理', dashboard:'数据看板', warehouse:'仓库管理',
+  procurement_v2:'采购管理', qc:'品控管理', finance:'财务工资',
+  settings:'系统设置', audit:'操作日志', dispatch:'派单管理',
+  productions:'生产记录', my_orders:'我的生产', inspections:'质检管理',
+  qc_reports:'品控报告', qc_hygiene:'卫生检查', qc_performance:'绩效考核',
+  qc_outbound:'出库管理', outbound:'出库管理', suppliers:'供应商管理',
+  preparation:'配料管理', packaging:'打包管理', notifications:'消息通知'
+};
+
+// ===== 工具 =====
+function toast(msg, duration) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(function() { t.classList.remove('show'); }, duration || 2000);
+}
+
+function api(method, url, data) {
+  return fetch(url, {
+    method: method,
+    headers: { 'Content-Type': 'application/json' },
+    body: data ? JSON.stringify(data) : undefined,
+    credentials: 'same-origin'
+  }).then(function(r) { return r.json(); });
+}
+
+// ===== 登录 =====
+document.getElementById('login-pwd').addEventListener('keypress', function(e) {
+  if (e.key === 'Enter') doLogin();
+});
+
+function doLogin() {
+  var u = document.getElementById('login-user').value.trim();
+  var p = document.getElementById('login-pwd').value;
+  if (!u || !p) { document.getElementById('login-err').textContent = '请输入账号和密码'; return; }
+  fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: u, password: p }),
+    credentials: 'same-origin'
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.user) {
+      if (d.user.role !== 'admin') {
+        document.getElementById('login-err').textContent = '权限不足，仅管理员可登录后台';
+        return;
+      }
+      document.getElementById('login-err').textContent = '';
+      document.getElementById('admin-name').textContent = d.user.real_name || d.user.username;
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('main').style.display = 'block';
+      initAdmin();
+    } else {
+      document.getElementById('login-err').textContent = d.error || '账号或密码错误';
+    }
+  }).catch(function() {
+    document.getElementById('login-err').textContent = '网络异常，请重试';
+  });
+}
+
+function doLogout() {
+  fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }).then(function() {
+    location.reload();
+  });
+}
+
+// ===== SSE连接 =====
+function connectSSE() {
+  if (sseConn) { try { sseConn.close(); } catch(e) {} }
+  sseConn = new EventSource('/admin/api/events');
+  sseConn.onopen = function() {
+    document.getElementById('sse-dot').classList.add('connected');
+    document.getElementById('sse-status-text').textContent = '已连接';
+  };
+  sseConn.onerror = function() {
+    document.getElementById('sse-dot').classList.remove('connected');
+    document.getElementById('sse-status-text').textContent = '重连中...';
+    setTimeout(connectSSE, 5000);
+  };
+  sseConn.onmessage = function(e) {
+    try {
+      var d = JSON.parse(e.data);
+      if (d.type === 'module_config_changed' || d.type === 'field_config_changed') {
+        toast('配置已在其他地方更新，已自动同步');
+      }
+    } catch(ex) {}
+  };
+}
+
+// ===== 初始化 =====
+function initAdmin() {
+  connectSSE();
+  showPage('dashboard');
+}
+
+// ===== 页面切换 =====
+function showPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.nav-item').forEach(function(el) {
+    el.classList.toggle('active', el.dataset.page === page);
+  });
+  var titles = {
+    dashboard: '数据总览', modules: '模块排序管理',
+    fields: '字段配置管理', announcements: '公告管理', users: '用户管理'
+  };
+  document.getElementById('page-title').textContent = titles[page] || page;
+  document.getElementById('save-all-btn').style.display = (page === 'modules' || page === 'fields') ? 'block' : 'none';
+  var area = document.getElementById('content-area');
+  area.innerHTML = '<div class="empty-tip">⏳ 加载中...</div>';
+  if (page === 'dashboard') renderDashboard();
+  else if (page === 'modules') renderModules();
+  else if (page === 'fields') renderFields();
+  else if (page === 'announcements') renderAnnouncements();
+  else if (page === 'users') renderUsers();
+}
+
+function saveCurrentPage() {
+  if (currentPage === 'modules') saveModules();
+  else if (currentPage === 'fields') saveFields();
+}
+
+// ===== 数据总览 =====
+function renderDashboard() {
+  api('GET', '/admin/api/stats').then(function(d) {
+    var area = document.getElementById('content-area');
+    area.innerHTML = [
+      '<div class="stats-grid">',
+      statCard('📋', d.orders_total, '总订单数'),
+      statCard('⏳', d.orders_pending, '待处理订单', '#e65100'),
+      statCard('🏭', d.orders_producing, '生产中', '#1565c0'),
+      statCard('✅', d.orders_completed, '已完成', '#2e7d32'),
+      statCard('👤', d.users_total, '系统用户'),
+      statCard('👥', d.teams_total, '生产班组'),
+      statCard('🍫', d.products_total, '产品档案'),
+      statCard('🏢', d.customers_total, '客户数'),
+      statCard('⚠️', d.raw_materials_low, '库存预警', '#c62828'),
+      statCard('🛒', d.proc_v2_pending, '待处理采购'),
+      statCard('🔍', d.qc_reports_today, '今日品控报告'),
+      statCard('📡', d.sseClients, 'SSE在线数'),
+      '</div>',
+      '<div class="card"><div class="card-header"><span class="card-title">📡 系统状态</span></div>',
+      '<p style="font-size:14px;color:#888;line-height:1.8">',
+      '✅ 可视化后台已启动<br>',
+      '✅ 实时推送（SSE）已就绪，当前在线客户端：<strong>' + (d.sseClients||0) + '</strong><br>',
+      '✅ 数据库运行正常<br>',
+      '✅ 部署环境：Render (海外服务器) — SSE心跳25秒，防止连接超时<br>',
+      '</p></div>'
+    ].join('');
+  }).catch(function() {
+    document.getElementById('content-area').innerHTML = '<div class="empty-tip">❌ 加载失败，请刷新</div>';
+  });
+}
+
+function statCard(icon, num, label, color) {
+  return '<div class="stat-card"><div style="font-size:24px">' + icon + '</div>' +
+    '<div class="stat-num" style="' + (color ? 'color:'+color : '') + '">' + (num||0) + '</div>' +
+    '<div class="stat-label">' + label + '</div></div>';
+}
+
+// ===== 模块排序 =====
+function renderModules() {
+  api('GET', '/admin/api/modules').then(function(d) {
+    moduleData = d;
+    renderModuleUI();
+  }).catch(function() {
+    document.getElementById('content-area').innerHTML = '<div class="empty-tip">❌ 加载失败</div>';
+  });
+}
+
+function renderModuleUI() {
+  var roles = Object.keys(ROLE_LABELS);
+  var tabs = roles.map(function(r) {
+    return '<div class="role-tab' + (r === currentRole ? ' active' : '') +
+      '" onclick="switchRole(\'' + r + '\')">' + ROLE_LABELS[r] + '</div>';
+  }).join('');
+
+  var modules = moduleData[currentRole] || [];
+  // 按sort_order排序
+  modules.sort(function(a,b) { return (a.sort_order||0)-(b.sort_order||0); });
+
+  var items = modules.length === 0
+    ? '<div class="empty-tip">该角色暂无模块配置（将使用默认菜单）</div>'
+    : modules.map(function(m, idx) {
+        return '<div class="module-item" draggable="true" data-key="' + m.module_key + '" ' +
+          'ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="dropItem(event)" ' +
+          'ondragend="dragEnd(event)">' +
+          '<span class="module-drag-handle">⠿</span>' +
+          '<span class="module-icon">' + (m.icon||'📌') + '</span>' +
+          '<div class="module-info">' +
+            '<div class="module-label">' +
+              '<input class="edit-label-input" value="' + escHtml(m.module_label) + '" ' +
+              'data-key="' + m.module_key + '" onchange="updateModuleLabel(this)" />' +
+            '</div>' +
+            '<div class="module-key">' + m.module_key + '</div>' +
+          '</div>' +
+          '<span class="module-sort-badge">' + (idx+1) + '</span>' +
+          '<label class="toggle-switch">' +
+            '<input type="checkbox" ' + (m.is_visible ? 'checked' : '') +
+            ' onchange="toggleModule(\'' + m.module_key + '\', this.checked)" />' +
+            '<div class="toggle-slider"></div>' +
+          '</label>' +
+          '</div>';
+      }).join('');
+
+  document.getElementById('content-area').innerHTML =
+    '<div class="card">' +
+    '<div class="card-header"><span class="card-title">🧩 各角色菜单模块拖拽排序</span>' +
+    '<div class="card-actions"><button class="btn btn-success btn-sm" onclick="saveModules()">💾 保存排序</button></div></div>' +
+    '<div class="section-hint">选择角色后，拖拽调整模块顺序，切换显隐状态，修改标签名称。保存后实时同步到前端。</div>' +
+    '<div class="drag-hint">💡 上下拖拽调整顺序 · 右侧开关控制显隐 · 标签名可直接编辑</div>' +
+    '<div class="role-tabs">' + tabs + '</div>' +
+    '<div class="module-list" id="module-list">' + items + '</div>' +
+    '</div>';
+}
+
+function switchRole(role) {
+  currentRole = role;
+  renderModuleUI();
+}
+
+function updateModuleLabel(input) {
+  var key = input.dataset.key;
+  var modules = moduleData[currentRole] || [];
+  modules.forEach(function(m) { if (m.module_key === key) m.module_label = input.value; });
+}
+
+function toggleModule(key, checked) {
+  var modules = moduleData[currentRole] || [];
+  modules.forEach(function(m) { if (m.module_key === key) m.is_visible = checked ? 1 : 0; });
+}
+
+// 拖拽逻辑
+function dragStart(e) {
+  dragSrc = e.currentTarget;
+  dragSrc.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+function dragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.module-item, .field-item').forEach(function(el) { el.classList.remove('drag-over'); });
+  e.currentTarget.classList.add('drag-over');
+}
+function dropItem(e) {
+  e.preventDefault();
+  var target = e.currentTarget;
+  if (target === dragSrc) { target.classList.remove('drag-over'); return; }
+  var list = target.parentNode;
+  var items = Array.from(list.children);
+  var srcIdx = items.indexOf(dragSrc);
+  var tgtIdx = items.indexOf(target);
+  if (srcIdx < tgtIdx) list.insertBefore(dragSrc, target.nextSibling);
+  else list.insertBefore(dragSrc, target);
+  target.classList.remove('drag-over');
+  // 同步到moduleData
+  syncOrderFromDOM();
+}
+function dragEnd(e) {
+  if (dragSrc) dragSrc.classList.remove('dragging');
+  document.querySelectorAll('.drag-over').forEach(function(el) { el.classList.remove('drag-over'); });
+  dragSrc = null;
+}
+
+function syncOrderFromDOM() {
+  var list = document.getElementById('module-list') || document.getElementById('field-list');
+  if (!list) return;
+  var isField = !!document.getElementById('field-list');
+  var items = Array.from(list.querySelectorAll(isField ? '.field-item' : '.module-item'));
+  items.forEach(function(el, idx) {
+    var key = el.dataset.key;
+    if (isField) {
+      var fields = fieldData[currentFieldModule] || [];
+      fields.forEach(function(f) { if (f.field_key === key) f.sort_order = idx; });
+    } else {
+      var modules = moduleData[currentRole] || [];
+      modules.forEach(function(m) { if (m.module_key === key) m.sort_order = idx; });
+    }
+    // 更新序号badge
+    var badge = el.querySelector('.module-sort-badge');
+    if (badge) badge.textContent = idx + 1;
+  });
+}
+
+function saveModules() {
+  var modules = moduleData[currentRole] || [];
+  // 从DOM重新读取顺序
+  var list = document.getElementById('module-list');
+  if (list) {
+    var items = Array.from(list.querySelectorAll('.module-item'));
+    items.forEach(function(el, idx) {
+      var key = el.dataset.key;
+      modules.forEach(function(m) { if (m.module_key === key) m.sort_order = idx; });
+    });
+  }
+  api('POST', '/admin/api/modules/' + currentRole, { modules: modules }).then(function(d) {
+    if (d.ok) toast('✅ ' + ROLE_LABELS[currentRole] + ' 模块配置已保存并同步！');
+    else toast('❌ 保存失败：' + (d.error||''));
+  });
+}
+
+// ===== 字段配置 =====
+var FIELD_MODULE_NAMES = {
+  orders: '订单', products: '产品', productions: '生产记录',
+  inspections: '质检', procurement_v2: '采购申请', qc_reports: '品控报告'
+};
+
+function renderFields() {
+  api('GET', '/admin/api/fields').then(function(d) {
+    fieldData = d;
+    renderFieldUI();
+  }).catch(function() {
+    document.getElementById('content-area').innerHTML = '<div class="empty-tip">❌ 加载失败</div>';
+  });
+}
+
+function renderFieldUI() {
+  var mods = Object.keys(FIELD_MODULE_NAMES);
+  var tabs = mods.map(function(m) {
+    return '<div class="field-module-tab' + (m === currentFieldModule ? ' active' : '') +
+      '" onclick="switchFieldModule(\'' + m + '\')">' + FIELD_MODULE_NAMES[m] + '</div>';
+  }).join('');
+
+  var fields = (fieldData[currentFieldModule] || []).slice();
+  fields.sort(function(a,b) { return (a.sort_order||0)-(b.sort_order||0); });
+
+  var typeBgMap = { text:'#e8f5e9', number:'#e3f2fd', select:'#fce4ec', textarea:'#fff3e0', date:'#f3e5f5', checkbox:'#e0f2f1' };
+  var typeColorMap = { text:'#2e7d32', number:'#1565c0', select:'#ad1457', textarea:'#e65100', date:'#6a1b9a', checkbox:'#004d40' };
+
+  var items = fields.length === 0
+    ? '<div class="empty-tip">暂无字段配置</div>'
+    : fields.map(function(f, idx) {
+        var bg = typeBgMap[f.field_type] || '#f5f5f5';
+        var color = typeColorMap[f.field_type] || '#555';
+        return '<div class="field-item" draggable="true" data-key="' + f.field_key + '" ' +
+          'ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="dropFieldItem(event)" ' +
+          'ondragend="dragEnd(event)">' +
+          '<span class="field-handle">⠿</span>' +
+          '<span style="background:' + bg + ';color:' + color + ';padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600">' + (f.field_type||'text') + '</span>' +
+          '<span style="flex:1;font-size:13px;font-weight:600">' +
+            '<input style="border:1.5px solid #eee;border-radius:5px;padding:3px 7px;font-size:13px;width:130px" ' +
+            'value="' + escHtml(f.field_label) + '" data-key="' + f.field_key + '" onchange="updateFieldLabel(this)" /></span>' +
+          '<span style="font-size:11px;color:#888;font-family:monospace">' + f.field_key + '</span>' +
+          '<span style="padding:2px 7px;border-radius:8px;font-size:11px;background:' + (f.is_required ? '#fce4ec' : '#f5f5f5') + ';color:' + (f.is_required ? '#c62828' : '#999') + '">' + (f.is_required ? '必填' : '选填') + '</span>' +
+          '<label class="toggle-switch">' +
+            '<input type="checkbox" ' + (f.is_visible ? 'checked' : '') +
+            ' onchange="toggleField(\'' + f.field_key + '\', this.checked)" />' +
+            '<div class="toggle-slider"></div>' +
+          '</label>' +
+          '</div>';
+      }).join('');
+
+  document.getElementById('content-area').innerHTML =
+    '<div class="card">' +
+    '<div class="card-header"><span class="card-title">📝 表单字段在线编辑</span>' +
+    '<div class="card-actions"><button class="btn btn-success btn-sm" onclick="saveFields()">💾 保存字段配置</button></div></div>' +
+    '<div class="section-hint">选择功能模块，拖拽调整字段顺序，修改字段中文名称，切换是否显示。</div>' +
+    '<div class="drag-hint">💡 拖拽排序 · 编辑标签名称 · 右侧开关控制显隐</div>' +
+    '<div class="field-module-tabs">' + tabs + '</div>' +
+    '<div class="field-list" id="field-list">' + items + '</div>' +
+    '</div>';
+}
+
+function switchFieldModule(mod) {
+  currentFieldModule = mod;
+  renderFieldUI();
+}
+
+function updateFieldLabel(input) {
+  var key = input.dataset.key;
+  var fields = fieldData[currentFieldModule] || [];
+  fields.forEach(function(f) { if (f.field_key === key) f.field_label = input.value; });
+}
+
+function toggleField(key, checked) {
+  var fields = fieldData[currentFieldModule] || [];
+  fields.forEach(function(f) { if (f.field_key === key) f.is_visible = checked ? 1 : 0; });
+}
+
+function dropFieldItem(e) {
+  e.preventDefault();
+  var target = e.currentTarget;
+  if (target === dragSrc) { target.classList.remove('drag-over'); return; }
+  var list = target.parentNode;
+  var items = Array.from(list.children);
+  var srcIdx = items.indexOf(dragSrc);
+  var tgtIdx = items.indexOf(target);
+  if (srcIdx < tgtIdx) list.insertBefore(dragSrc, target.nextSibling);
+  else list.insertBefore(dragSrc, target);
+  target.classList.remove('drag-over');
+  // 更新sort_order
+  var allItems = Array.from(list.querySelectorAll('.field-item'));
+  var fields = fieldData[currentFieldModule] || [];
+  allItems.forEach(function(el, idx) {
+    var key = el.dataset.key;
+    fields.forEach(function(f) { if (f.field_key === key) f.sort_order = idx; });
+  });
+}
+
+function saveFields() {
+  var fields = fieldData[currentFieldModule] || [];
+  // 从DOM读取最新顺序
+  var list = document.getElementById('field-list');
+  if (list) {
+    var items = Array.from(list.querySelectorAll('.field-item'));
+    items.forEach(function(el, idx) {
+      var key = el.dataset.key;
+      fields.forEach(function(f) { if (f.field_key === key) f.sort_order = idx; });
+    });
+  }
+  api('POST', '/admin/api/fields/' + currentFieldModule, { fields: fields }).then(function(d) {
+    if (d.ok) toast('✅ ' + FIELD_MODULE_NAMES[currentFieldModule] + ' 字段配置已保存并推送！');
+    else toast('❌ 保存失败：' + (d.error||''));
+  });
+}
+
+// ===== 公告 =====
+function renderAnnouncements() {
+  api('GET', '/admin/api/announcements').then(function(list) {
+    var roleMap = { all:'全部', admin:'管理员', clerk:'文员', supervisor:'组长', team:'班组',
+      qc:'品控', packaging:'打包', warehouse:'仓库', finance:'财务', procurement:'采购' };
+    var items = list.length === 0
+      ? '<div class="empty-tip">暂无公告</div>'
+      : list.map(function(a) {
+          return '<div class="announcement-item">' +
+            '<div class="ann-status ' + (a.is_active ? 'active' : 'inactive') + '"></div>' +
+            '<div class="ann-info">' +
+              '<div class="ann-title">' + escHtml(a.title) + '</div>' +
+              '<div class="ann-meta">目标: ' + (roleMap[a.target_roles]||a.target_roles) + ' · ' + (a.created_at||'').slice(0,16) +
+              (a.expires_at ? ' · 过期: ' + a.expires_at.slice(0,16) : '') + '</div>' +
+            '</div>' +
+            '<button class="btn btn-sm ' + (a.is_active ? 'btn-outline' : 'btn-success') + '" ' +
+              'onclick="toggleAnnouncement(' + a.id + ',' + (a.is_active ? 0 : 1) + ')">' +
+              (a.is_active ? '停用' : '启用') + '</button>' +
+            '<button class="btn btn-sm btn-danger" onclick="deleteAnnouncement(' + a.id + ')">删除</button>' +
+            '</div>';
+        }).join('');
+
+    document.getElementById('content-area').innerHTML =
+      '<div class="card">' +
+      '<div class="card-header"><span class="card-title">📢 公告列表</span>' +
+      '<div class="card-actions"><button class="btn btn-primary btn-sm" onclick="openAnnModal()">+ 发布新公告</button></div></div>' +
+      '<div class="section-hint">公告发布后实时推送到小程序所有在线用户，支持按角色定向推送。</div>' +
+      '<div class="announcement-list">' + items + '</div></div>';
+  });
+}
+
+function openAnnModal() {
+  document.getElementById('ann-title').value = '';
+  document.getElementById('ann-content').value = '';
+  document.getElementById('ann-roles').value = 'all';
+  document.getElementById('ann-expires').value = '';
+  document.getElementById('ann-modal').classList.add('show');
+}
+function closeAnnModal() { document.getElementById('ann-modal').classList.remove('show'); }
+
+function submitAnnouncement() {
+  var title = document.getElementById('ann-title').value.trim();
+  if (!title) { toast('请填写公告标题'); return; }
+  api('POST', '/admin/api/announcements', {
+    title: title,
+    content: document.getElementById('ann-content').value,
+    target_roles: document.getElementById('ann-roles').value,
+    expires_at: document.getElementById('ann-expires').value || null
+  }).then(function(d) {
+    if (d.ok) { closeAnnModal(); toast('✅ 公告已发布并推送！'); renderAnnouncements(); }
+    else toast('❌ ' + (d.error||'发布失败'));
+  });
+}
+
+function toggleAnnouncement(id, active) {
+  api('PATCH', '/admin/api/announcements/' + id, { is_active: active }).then(function(d) {
+    if (d.ok) { toast(active ? '✅ 公告已启用' : '⏸ 公告已停用'); renderAnnouncements(); }
+  });
+}
+
+function deleteAnnouncement(id) {
+  if (!confirm('确定删除该公告？')) return;
+  api('DELETE', '/admin/api/announcements/' + id).then(function(d) {
+    if (d.ok) { toast('🗑 已删除'); renderAnnouncements(); }
+  });
+}
+
+// ===== 用户管理 =====
+function renderUsers() {
+  api('GET', '/admin/api/users').then(function(users) {
+    var rows = users.map(function(u) {
+      return '<tr>' +
+        '<td>' + u.id + '</td>' +
+        '<td><strong>' + escHtml(u.username) + '</strong></td>' +
+        '<td>' + escHtml(u.real_name) + '</td>' +
+        '<td><span class="role-badge ' + (u.role === 'admin' ? 'admin' : '') + '">' + (ROLE_LABELS[u.role]||u.role) + '</span></td>' +
+        '<td>' + (u.created_at||'').slice(0,10) + '</td>' +
+        '<td>' +
+          '<button class="btn btn-sm btn-outline" onclick="openPwdModal(' + u.id + ',\'' + escHtml(u.real_name||u.username) + '\')">重置密码</button>' +
+        '</td>' +
+        '</tr>';
+    }).join('');
+    document.getElementById('content-area').innerHTML =
+      '<div class="card">' +
+      '<div class="card-header"><span class="card-title">👤 系统用户列表</span></div>' +
+      '<div class="section-hint">共 ' + users.length + ' 个用户。可重置用户密码（默认重置为123456）。</div>' +
+      '<table class="user-table"><thead><tr>' +
+      '<th>ID</th><th>账号</th><th>姓名</th><th>角色</th><th>创建时间</th><th>操作</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  });
+}
+
+function openPwdModal(id, name) {
+  pwdUserId = id;
+  document.getElementById('pwd-user-name').value = name;
+  document.getElementById('pwd-new').value = '123456';
+  document.getElementById('pwd-modal').classList.add('show');
+}
+function closePwdModal() { document.getElementById('pwd-modal').classList.remove('show'); pwdUserId = null; }
+
+function submitResetPwd() {
+  if (!pwdUserId) return;
+  var pwd = document.getElementById('pwd-new').value.trim();
+  if (!pwd) { toast('请输入新密码'); return; }
+  api('POST', '/admin/api/users/' + pwdUserId + '/reset-password', { password: pwd }).then(function(d) {
+    if (d.ok) { closePwdModal(); toast('✅ 密码已重置'); }
+    else toast('❌ ' + (d.error||''));
+  });
+}
+
+// ===== 工具函数 =====
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// 关闭模态框点击遮罩
+document.querySelectorAll('.modal-overlay').forEach(function(el) {
+  el.addEventListener('click', function(e) {
+    if (e.target === el) el.classList.remove('show');
+  });
+});
+</script>
+</body>
+</html>

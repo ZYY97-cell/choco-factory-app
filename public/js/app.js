@@ -300,7 +300,33 @@ async function renderDashboard() {
     ]
   };
 
-  const tabs = roleTabs[currentUser.role] || [];
+  // 优先使用后台配置的模块顺序（支持可视化后台拖拽排序）
+  let tabs = roleTabs[currentUser.role] || [];
+  const adminConfig = getAdminModuleConfig();
+  if (adminConfig && adminConfig.length > 0) {
+    // 用后台配置的顺序和标签名重排tabs
+    const tabMap = {};
+    tabs.forEach(function(t) { tabMap[t.id] = t; });
+    const reordered = [];
+    adminConfig.forEach(function(m) {
+      // module_key 映射到 tab id（简单前缀匹配）
+      var matched = tabs.find(function(t) {
+        return t.id === m.module_key ||
+               t.id.endsWith('-' + m.module_key) ||
+               t.id.replace(/-/g,'_') === m.module_key ||
+               m.module_key.includes(t.id.split('-')[0]);
+      });
+      if (matched) {
+        reordered.push(Object.assign({}, matched, { label: m.module_label || matched.label, icon: m.icon || matched.icon }));
+      }
+    });
+    // 把原tabs中没有被后台配置覆盖的追加到末尾（防止丢失）
+    if (reordered.length > 0) {
+      const usedIds = new Set(reordered.map(function(t) { return t.id; }));
+      tabs.forEach(function(t) { if (!usedIds.has(t.id)) reordered.push(t); });
+      tabs = reordered;
+    }
+  }
   const stats = await API.get('/api/stats/overview');
   
   const roleNames = { clerk: '文员', supervisor: '生产组长', team: '生产班组', qc: '内包质检', packaging: '外包打包', console: '总台', finance: '财务', warehouse: '仓库管理', procurement: '采购专员', preparation: '配料人员', admin: '管理员' };
@@ -3532,8 +3558,12 @@ async function init() {
     if (res.user) {
       currentUser = res.user;
       loadNotifications();
+      // 加载后台配置（模块排序、字段配置）
+      await loadAdminConfig();
       navigate('dashboard');
       initFloatingButton();
+      // 连接SSE实时同步
+      connectAdminSSE();
     } else {
       navigate('login');
     }
@@ -3545,3 +3575,88 @@ async function init() {
 }
 
 init();
+
+// ===== 可视化后台配置同步 =====
+var _adminModuleConfig = null; // 当前角色模块配置
+var _adminFieldConfig = {};    // 字段配置缓存
+var _adminSSE = null;
+var _configVersion = 0;
+
+// 加载后台模块配置
+async function loadAdminConfig() {
+  if (!currentUser) return;
+  try {
+    var modules = await API.get('/admin/api/modules/' + currentUser.role);
+    if (modules && modules.length > 0) {
+      _adminModuleConfig = modules.filter(function(m) { return m.is_visible; });
+      _adminModuleConfig.sort(function(a, b) { return (a.sort_order||0) - (b.sort_order||0); });
+      console.log('[admin-config] 模块配置已加载:', _adminModuleConfig.length, '个模块');
+    }
+  } catch(e) {
+    console.warn('[admin-config] 模块配置加载失败，使用默认配置');
+  }
+  // 获取版本号
+  try {
+    var ver = await API.get('/admin/api/config-version');
+    _configVersion = ver.version || 0;
+  } catch(e) {}
+}
+
+// 获取字段配置（带缓存）
+async function getAdminFieldConfig(moduleKey) {
+  if (_adminFieldConfig[moduleKey]) return _adminFieldConfig[moduleKey];
+  try {
+    var fields = await API.get('/admin/api/fields/' + moduleKey);
+    if (fields && fields.length > 0) {
+      _adminFieldConfig[moduleKey] = fields;
+      return fields;
+    }
+  } catch(e) {}
+  return null;
+}
+
+// SSE实时同步（配置变更自动重新加载）
+function connectAdminSSE() {
+  if (_adminSSE) { try { _adminSSE.close(); } catch(e) {} }
+  try {
+    _adminSSE = new EventSource('/admin/api/events');
+    _adminSSE.onmessage = function(e) {
+      try {
+        var d = JSON.parse(e.data);
+        if (d.type === 'module_config_changed') {
+          // 如果是当前用户角色的配置变更，重新加载
+          if (!d.data || !d.data.role || d.data.role === currentUser.role) {
+            _adminModuleConfig = null;
+            loadAdminConfig().then(function() {
+              // 如果当前在dashboard，刷新tab显示
+              if (currentPage === 'dashboard') navigate('dashboard');
+            });
+          }
+        } else if (d.type === 'field_config_changed') {
+          // 清除字段缓存，下次使用时重新加载
+          if (d.data && d.data.module) {
+            delete _adminFieldConfig[d.data.module];
+          } else {
+            _adminFieldConfig = {};
+          }
+        } else if (d.type === 'announcement') {
+          // 收到新公告，显示toast
+          if (d.data && d.data.title) {
+            showToast('📢 新公告: ' + d.data.title, 'info');
+          }
+        }
+      } catch(ex) {}
+    };
+    _adminSSE.onerror = function() {
+      // Render海外服务器：断线后5秒重连
+      setTimeout(connectAdminSSE, 5000);
+    };
+  } catch(e) {
+    console.warn('[admin-sse] SSE不可用');
+  }
+}
+
+// 获取当前角色的后台模块配置（供dashboard使用）
+function getAdminModuleConfig() {
+  return _adminModuleConfig;
+}

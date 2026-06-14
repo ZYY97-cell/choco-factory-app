@@ -1036,6 +1036,64 @@ function createTables() {
   db.run("CREATE INDEX IF NOT EXISTS idx_qc_checks_type ON qc_hygiene_checks(check_type)");
   db.run("CREATE INDEX IF NOT EXISTS idx_qc_checks_date ON qc_hygiene_checks(check_date)");
   db.run("CREATE INDEX IF NOT EXISTS idx_notifications_link ON notifications(link_type, link_id)");
+
+  // ===== 可视化后台配置 =====
+  // 模块排序与显示配置（每个角色的菜单模块顺序和显示状态）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS admin_module_config (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      role TEXT NOT NULL,
+      module_key TEXT NOT NULL,
+      module_label TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      is_visible INTEGER DEFAULT 1,
+      icon TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(role, module_key)
+    );
+  `);
+
+  // 字段配置（可编辑各模块展示的字段名称和顺序）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS admin_field_config (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      module_key TEXT NOT NULL,
+      field_key TEXT NOT NULL,
+      field_label TEXT NOT NULL,
+      field_type TEXT DEFAULT 'text',
+      is_visible INTEGER DEFAULT 1,
+      is_required INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      options TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(module_key, field_key)
+    );
+  `);
+
+  // 全局公告/通知配置（后台可在线发布公告，实时推送到所有前端用户）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS admin_announcements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      content TEXT,
+      target_roles TEXT DEFAULT 'all',
+      is_active INTEGER DEFAULT 1,
+      created_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME
+    );
+  `);
+
+  // 后台SSE客户端心跳记录（仅内存用，表结构用于记录最后推送时间）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS admin_config_version (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      version INTEGER DEFAULT 1,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  // 确保version记录存在
+  db.run("INSERT OR IGNORE INTO admin_config_version (id, version) VALUES (1, 1)");
 }
 
 function seedData() {

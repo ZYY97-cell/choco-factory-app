@@ -7,6 +7,7 @@ const fs = require('fs');
 const { initDatabase, getDb, saveDatabase } = require('./db.js');
 let db = null;
 var setupRoutesV2 = require('./routes_v2');
+var setupAdminRoutes = require('./routes_admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1708,6 +1709,8 @@ async function start() {
   db = await initDatabase();
   // 注册 v2 路由（采购v2 + 品控）
   setupRoutesV2(app, db, dbRun, dbQuery, rowsToObjects, safe, addNotif, requireLogin, requireRole, canViewQcReports, upload, cleanupOldProcurementData);
+  // 注册可视化后台路由
+  setupAdminRoutes(app, getDb, saveDatabase, requireRole);
   console.log('巧克力工厂生产管控系统启动！');
   console.log('本机: http://localhost:' + PORT);
   var os = require('os');
