@@ -456,7 +456,16 @@ function api(method, url, data) {
     headers: { 'Content-Type': 'application/json' },
     body: data ? JSON.stringify(data) : undefined,
     credentials: 'same-origin'
-  }).then(function(r) { return r.json(); });
+  }).then(function(r) {
+    if (!r.ok) {
+      return r.json().catch(function() { return {}; }).then(function(body) {
+        var err = new Error(body.error || ('HTTP ' + r.status));
+        err.status = r.status;
+        throw err;
+      });
+    }
+    return r.json();
+  });
 }
 
 // ===== 登录 =====
@@ -580,8 +589,9 @@ function renderDashboard() {
       '✅ 部署环境：Render (海外服务器) — SSE心跳25秒，防止连接超时<br>',
       '</p></div>'
     ].join('');
-  }).catch(function() {
-    document.getElementById('content-area').innerHTML = '<div class="empty-tip">❌ 加载失败，请刷新</div>';
+  }).catch(function(e) {
+    var msg = e && e.message ? e.message : '请检查网络或重新登录';
+    document.getElementById('content-area').innerHTML = '<div class="empty-tip">❌ 加载失败：' + msg + '<br><button onclick="renderDashboard()" style="margin-top:12px;padding:6px 18px;background:var(--primary);color:#fff;border:none;border-radius:6px;cursor:pointer">重试</button></div>';
   });
 }
 
@@ -596,8 +606,9 @@ function renderModules() {
   api('GET', '/admin/api/modules').then(function(d) {
     moduleData = d;
     renderModuleUI();
-  }).catch(function() {
-    document.getElementById('content-area').innerHTML = '<div class="empty-tip">❌ 加载失败</div>';
+  }).catch(function(e) {
+    var msg = e && e.message ? e.message : '请重新登录';
+    document.getElementById('content-area').innerHTML = '<div class="empty-tip">❌ 加载失败：' + msg + '</div>';
   });
 }
 
@@ -742,8 +753,9 @@ function renderFields() {
   api('GET', '/admin/api/fields').then(function(d) {
     fieldData = d;
     renderFieldUI();
-  }).catch(function() {
-    document.getElementById('content-area').innerHTML = '<div class="empty-tip">❌ 加载失败</div>';
+  }).catch(function(e) {
+    var msg = e && e.message ? e.message : '请重新登录';
+    document.getElementById('content-area').innerHTML = '<div class="empty-tip">❌ 加载失败：' + msg + '</div>';
   });
 }
 
