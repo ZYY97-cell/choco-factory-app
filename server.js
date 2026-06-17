@@ -1079,10 +1079,7 @@ app.post('/api/preparations', requireRole('preparation','admin'), function(req, 
   dbRun("INSERT INTO preparations (order_id,preparer_id,prep_date,color_target,color_result,notes) VALUES (" + safeNum(b.order_id) + "," + (req.session.user?req.session.user.id:0) + ",'" + safe(b.prep_date||'') + "','" + safe(b.color_target||'') + "','" + safe(b.color_result||'') + "','" + safe(b.notes||'') + "')");
   var pid = getLastId('preparations');
   (b.items||[]).forEach(function(it) {
-    // material_type 必须在 CHECK 约束范围内: chocolate, colorant, other
-    var mt = it.material_type || 'other';
-    if (mt !== 'chocolate' && mt !== 'colorant') mt = 'other';
-    dbRun("INSERT INTO preparation_items (prep_id,material_type,material_id,material_name,usage_grams,notes) VALUES (" + pid + ",'" + mt + "'," + safeNum(it.material_id) + ",'" + safe(it.material_name||'') + "'," + parseFloat(it.usage_grams||0) + ",'" + safe(it.notes||'') + "')");
+    dbRun("INSERT INTO preparation_items (prep_id,material_type,material_id,material_name,usage_grams,notes) VALUES (" + pid + ",'" + safe(it.material_type||'other') + "'," + safeNum(it.material_id) + ",'" + safe(it.material_name||'') + "'," + parseFloat(it.usage_grams||0) + ",'" + safe(it.notes||'') + "')");
     dbRun("UPDATE raw_materials SET stock_qty=stock_qty-" + Math.ceil(parseFloat(it.usage_grams||0)) + " WHERE id=" + safeNum(it.material_id));
     dbRun("INSERT INTO raw_material_issues (material_id,quantity,issued_to_role,issued_to_name,issued_by,notes) VALUES (" + safeNum(it.material_id) + "," + Math.ceil(parseFloat(it.usage_grams||0)) + ",'preparation','" + safe((req.session.user||{}).real_name||'') + "'," + (req.session.user?req.session.user.id:0) + ",'配料领用')");
   });
