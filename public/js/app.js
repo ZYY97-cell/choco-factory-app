@@ -1209,10 +1209,14 @@ async function renderTeamProduce() {
   const orderId = window._produceOrderId;
   if (!orderId) return navigate('team-list');
   const order = await API.get(`/api/orders/${orderId}`);
-  const team = (await API.get('/api/teams')).find(t => t.id === currentUser.team_id);
-  const members = team ? team.members : [];
+  // 修复: /api/teams 不返回 members，需从 /api/team-members 获取
+  const allMembers = await API.get('/api/team-members');
+  const members = allMembers.filter(m => m.team_id === currentUser.team_id && m.status !== 'inactive');
   
   window._selectedWorkers = [];
+  
+  // 处理订单产品列表：兼容 items 和无 items 的情况
+  const orderItems = (order.items && order.items.length) ? order.items : [{ id: 0, product_name: order.product_name, quantity: order.quantity }];
   
   $('#app').innerHTML = `
     <div class="page-header"><h1>🏭 生产填报</h1></div>
@@ -1220,16 +1224,16 @@ async function renderTeamProduce() {
       <div class="detail-section">
         <h3>📋 订单信息</h3>
         <div class="detail-row"><span class="label">单号</span><span class="value">${order.order_no}</span></div>
-        <div class="detail-row"><span class="label">客户</span><span class="value">${order.customer_name}</span></div>
-        <div class="detail-row"><span class="label">产品</span><span class="value">${order.product_name}</span></div>
+        <div class="detail-row"><span class="label">客户</span><span class="value">${esc(order.customer_name||'')}</span></div>
+        <div class="detail-row"><span class="label">产品</span><span class="value">${esc(order.product_name||'')}</span></div>
         <div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:700;color:var(--primary)">${order.quantity}</span></div>
         ${order.image_url ? '<img src="'+order.image_url+'" style="max-width:200px;margin-top:6px;border-radius:8px">' : ''}
-        ${(order.product_children||[]).length ? '<div style="margin-top:8px;font-size:13px;color:var(--accent)"><strong>子产品组合：</strong>'+order.product_children.map(function(c){return c.name+'×'+c.quantity}).join(' / ')+'</div>' : ''}
+        ${(order.product_children||[]).length ? '<div style="margin-top:8px;font-size:13px;color:var(--accent)"><strong>子产品组合：</strong>'+order.product_children.map(function(c){return esc(c.name)+'×'+c.quantity}).join(' / ')+'</div>' : ''}
       </div>
       <div class="detail-section">
         <h3>👷 选择当班人员</h3>
         <div class="worker-select">
-          ${members.map(m => `<div class="worker-chip" onclick="toggleWorker(this,'${m.name}')">${m.name}</div>`).join('')}
+          ${members.map(m => `<div class="worker-chip" onclick="toggleWorker(this,'${esc(m.name)}')">${esc(m.name)}</div>`).join('')}
         </div>
       </div>
       <div class="detail-section">
@@ -1237,7 +1241,7 @@ async function renderTeamProduce() {
         <table class="production-table">
           <thead><tr><th>项目</th><th>下单数量</th><th>实际产量</th></tr></thead>
           <tbody>
-            ${(order.items||[]).map(it => `<tr><td>${it.name}</td><td>${order.quantity}</td><td><input type="number" min="0" id="prod-${it.id}" placeholder="0" oninput="calcTotal()"></td></tr>`).join('')}
+            ${orderItems.map(it => `<tr><td>${esc(it.product_name||it.name||'')}</td><td>${it.quantity}</td><td><input type="number" min="0" id="prod-${it.id}" placeholder="0" oninput="calcTotal()"></td></tr>`).join('')}
           </tbody>
           <tfoot><tr><td colspan="2" style="font-weight:700">合计</td><td id="prod-total" style="font-weight:700;color:var(--primary)">0</td></tr></tfoot>
         </table>
@@ -1274,10 +1278,10 @@ async function submitProduction() {
   
   const order = await API.get(`/api/orders/${orderId}`);
   const itemDetails = (order.items||[]).map(it => ({
-    name: it.name,
+    name: it.product_name || it.name || '',
     product_item_id: it.id,
     produced: parseInt($(`#prod-${it.id}`).value) || 0,
-    order_qty: order.quantity
+    order_qty: it.quantity || order.quantity
   }));
   const total = itemDetails.reduce((s, it) => s + it.produced, 0);
   const notes = $('#prod-notes').value.trim();
@@ -1310,9 +1314,13 @@ async function renderTeamRework() {
 async function startRework(orderId) {
   window._reworkOrderId = orderId;
   const order = await API.get(`/api/orders/${orderId}`);
-  const team = (await API.get('/api/teams')).find(t => t.id === currentUser.team_id);
-  const members = team ? team.members : [];
+  // 修复: /api/teams 不返回 members，需从 /api/team-members 获取
+  const allMembers = await API.get('/api/team-members');
+  const members = allMembers.filter(m => m.team_id === currentUser.team_id && m.status !== 'inactive');
   window._selectedWorkers = [];
+  
+  // 处理订单产品列表
+  const orderItems = (order.items && order.items.length) ? order.items : [{ id: 0, product_name: order.product_name, quantity: order.quantity }];
   
   $('#app').innerHTML = `
     <div class="page-header"><h1>🔄 补产填报</h1></div>
@@ -1321,13 +1329,13 @@ async function startRework(orderId) {
       <div class="detail-section">
         <h3>📋 订单信息</h3>
         <div class="detail-row"><span class="label">单号</span><span class="value">${order.order_no}</span></div>
-        <div class="detail-row"><span class="label">客户</span><span class="value">${order.customer_name}</span></div>
+        <div class="detail-row"><span class="label">客户</span><span class="value">${esc(order.customer_name||'')}</span></div>
         <div class="detail-row"><span class="label">下单数量</span><span class="value" style="font-weight:700;color:var(--primary)">${order.quantity}</span></div>
       </div>
       <div class="detail-section">
         <h3>👷 选择当班人员</h3>
         <div class="worker-select">
-          ${members.map(m => `<div class="worker-chip" onclick="toggleWorker(this,'${m.name}')">${m.name}</div>`).join('')}
+          ${members.map(m => `<div class="worker-chip" onclick="toggleWorker(this,'${esc(m.name)}')">${esc(m.name)}</div>`).join('')}
         </div>
       </div>
       <div class="detail-section">
@@ -1335,7 +1343,7 @@ async function startRework(orderId) {
         <table class="production-table">
           <thead><tr><th>项目</th><th>补产数量</th></tr></thead>
           <tbody>
-            ${(order.items||[]).map(it => `<tr><td>${it.name}</td><td><input type="number" min="0" id="rw-${it.id}" placeholder="0" oninput="calcRework()"></td></tr>`).join('')}
+            ${orderItems.map(it => `<tr><td>${esc(it.product_name||it.name||'')}</td><td><input type="number" min="0" id="rw-${it.id}" placeholder="0" oninput="calcRework()"></td></tr>`).join('')}
           </tbody>
           <tfoot><tr><td style="font-weight:700">合计</td><td id="rw-total" style="font-weight:700">0</td></tr></tfoot>
         </table>
@@ -1359,8 +1367,8 @@ async function submitRework() {
   if (!workers) return showToast('请选择当班人员', 'error');
   const order = await API.get(`/api/orders/${orderId}`);
   const itemDetails = (order.items||[]).map(it => ({
-    name: it.name, product_item_id: it.id,
-    produced: parseInt($(`#rw-${it.id}`).value) || 0, order_qty: order.quantity
+    name: it.product_name || it.name || '', product_item_id: it.id,
+    produced: parseInt($(`#rw-${it.id}`).value) || 0, order_qty: it.quantity || order.quantity
   }));
   const total = itemDetails.reduce((s, it) => s + it.produced, 0);
   const notes = $('#rw-notes').value.trim();
@@ -1423,7 +1431,7 @@ async function renderQCInspect() {
         <div style="margin-bottom:8px;font-size:12px;color:var(--text-secondary)">逐项填写每个产品细项的合格数和不良原因</div>
         ${items.map((it, idx) => `
           <div class="card" style="border-left:4px solid var(--primary);margin-bottom:10px">
-            <div style="font-weight:700;font-size:15px;margin-bottom:8px">🔸 ${it.name}</div>
+            <div style="font-weight:700;font-size:15px;margin-bottom:8px">🔸 ${esc(it.product_name||it.name||'')}</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
               <div class="form-group" style="margin:0">
                 <label style="font-size:12px">合格数量 *</label>
