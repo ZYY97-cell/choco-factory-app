@@ -711,7 +711,7 @@ function buildDispatchModal(modal, order, teams, items, dispatchStats, threshold
     // 按数量拆分模式
     bodyHtml = items.map(function(it, i) {
       var tid = items.length > 1 ? ('item_'+i) : 'qty';
-      return '<div style="margin-bottom:14px;padding:12px;background:#fdf8f3;border-radius:8px">' +
+      return '<div id="dispatch-product-block-' + tid + '" style="margin-bottom:14px;padding:12px;background:#fdf8f3;border-radius:8px;border:2px solid transparent;transition:border-color 0.3s">' +
         '<div style="font-weight:700;margin-bottom:4px">📦 产品'+(items.length>1?(''+(i+1)+': '):'')+esc(it.product_name)+' <span style="color:var(--primary)">总量 '+it.quantity+' 件</span></div>' +
         '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">为每个班组分配数量（总和='+it.quantity+'）：</div>' +
         '<div id="dispatch-qtyteams-'+tid+'">' + teams.map(function(t){return renderTeamCard(t, tid+'_team'+t.id, true);}).join('') + '</div>' +
@@ -802,8 +802,8 @@ async function confirmDispatch() {
   if (mode === 'byQuantity') {
     // 按数量拆分模式
     var qtySels = window._dispatchQtySelections || {};
-    var errors = [];
-    var warnings = [];
+    var errors = [];   // { label, extra, productName }
+    var warnings = []; // { label, extra, productName }
     itms.forEach(function(it, i) {
       var extra = itms.length > 1 ? ('item_'+i) : 'qty';
       var sel = qtySels[extra] || {};
@@ -815,20 +815,49 @@ async function confirmDispatch() {
           subtotal += qty;
         }
       }
+      var prodLabel = (itms.length > 1 ? ('产品' + (i+1) + ': ') : '') + esc(it.product_name);
       if (subtotal === 0) {
-        errors.push('产品'+(itms.length>1?(''+(i+1)+' '):'')+esc(it.product_name)+'：未分配任何数量');
+        // 直接在此处构造完整对象，携带原始 extra 和产品信息
+        errors.push({ label: prodLabel + '（需分配 ' + it.quantity + ' 件）', extra: extra, productName: it.product_name });
       } else if (subtotal !== it.quantity) {
-        warnings.push('产品'+(itms.length>1?(''+(i+1)+' '):'')+esc(it.product_name)+'：已分配'+subtotal+'/'+it.quantity+'（差额'+(it.quantity-subtotal)+'）');
+        warnings.push({ label: prodLabel + '：已分配 ' + subtotal + '/' + it.quantity + ' 件（差 ' + (it.quantity-subtotal) + ' 件）', extra: extra, productName: it.product_name });
       }
     });
+
     if (errors.length > 0) {
-      return showToast('请为以下产品分配数量：' + errors.join('；'), 'error');
+      var errorItems = errors.map(function(err) {
+        return { label: err.label, extra: err.extra, type: 'error' };
+      });
+      var hintMsg = errors.length === itms.length
+        ? '全部 ' + errors.length + ' 款产品都还未分配，请逐个填写班组数量'
+        : '以上 ' + errors.length + ' 款产品未分配（共 ' + itms.length + ' 款），点击可跳转定位';
+      return showDispatchValidationDialog(
+        '以下产品尚未分配数量',
+        errorItems,
+        'error', null,
+        hintMsg
+      );
     }
-    if (warnings.length > 0 && !confirm('以下产品数量未完全分配：\n' + warnings.join('\n') + '\n\n已分配的数量将立即派单，剩余数量保留待派状态。\n\n确定继续？')) {
-      return;
+
+    if (warnings.length > 0) {
+      var warnItems = warnings.map(function(w) {
+        return { label: w.label, extra: w.extra, type: 'warning' };
+      });
+      return showDispatchValidationDialog(
+        '部分产品数量未完全分配',
+        warnItems,
+        'warning',
+        function() { proceedDispatch(items); },
+        '已分配的数量将立即派单，剩余 ' + warnings.length + ' 款产品的差额保留待后续补派'
+      );
     }
     if (!items.length) {
-      return showToast('请为至少一个班组填写分配数量', 'error');
+      return showDispatchValidationDialog(
+        '未分配任何数量',
+        [{ label: '请为至少一个班组填写分配数量', extra: 'qty', type: 'error' }],
+        'error', null,
+        '在班组卡片中输入分配数量后重新提交'
+      );
     }
   } else {
     // 按产品拆分模式
@@ -862,21 +891,165 @@ async function confirmDispatch() {
     }
     
     if (!items.length) {
-      return showToast('请至少为一个产品选择班组（可逐个选或使用整体分配）', 'error');
+      return showDispatchValidationDialog(
+        '未选择班组',
+        [{ label: '请至少为一个产品选择班组（可逐个选或使用整体分配）', extra: '0', type: 'error' }],
+        'error', null,
+        '请点击产品下方班组卡片完成分配'
+      );
     }
     
     // 允许部分派单：已选的产品先派，未选的保留待派状态
     if (missing.length > 0 && !sels.all && hasIndividual) {
-      var names = missing.map(function(i) { return '产品' + (i+1); }).join('、');
-      if (!confirm('以下产品未分配班组：' + names + '\n\n已选 ' + items.length + ' 个产品将立即派单，剩余产品保留待派状态，可后续补派。\n\n确定只派已选产品？')) {
-        return;
-      }
+      var missingItems = missing.map(function(i) {
+        return { label: '产品' + (i+1) + ': ' + esc(itms[i].product_name) + ' x' + itms[i].quantity, extra: String(i), type: 'warning' };
+      });
+      return showDispatchValidationDialog(
+        '以下产品未分配班组',
+        missingItems,
+        'warning',
+        function() { proceedDispatch(items); },
+        '已选 ' + items.length + ' 个产品将立即派单，剩余产品保留待派状态可后续补派'
+      );
     }
   }
   
+  proceedDispatch(items);
+}
+
+// 实际执行派单 API 调用
+async function proceedDispatch(items) {
   var res = await API.post('/api/orders/' + window._dispatchOrderId + '/dispatch', { items: items });
   if (res.success) { showToast('派单成功（' + items.length + '条）', 'success'); closeModal(); navigate('supervisor-pending'); }
   else showToast(res.msg || '派单失败', 'error');
+}
+
+// 派单校验弹窗 - 替代 showToast / confirm
+function showDispatchValidationDialog(title, items, type, onConfirm, subtitle) {
+  var existing = document.getElementById('dispatch-validation-modal');
+  if (existing) existing.remove();
+  window._dispatchValidationCallback = onConfirm || null;
+
+  var icon = type === 'error' ? '🚫' : '⚠️';
+  var headerColor = type === 'error' ? 'var(--danger)' : 'var(--warning)';
+
+  // 构建统计信息
+  var totalCount = window._dispatchItems ? window._dispatchItems.length : items.length;
+  var summaryHtml = '';
+  if (type === 'error' && items.length > 0 && totalCount > 1) {
+    summaryHtml = '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;padding:8px;background:#f5f5f5;border-radius:6px;line-height:1.6">' +
+      '📋 本订单共 <b>' + totalCount + '</b> 款产品，其中 <b style="color:var(--danger)">' + items.length + '</b> 款未分配数量<br>' +
+      '💡 点击下方红色条目可自动跳转到对应产品的填写区域</div>';
+  }
+
+  var itemsHtml = items.map(function(item, i) {
+    var isClickable = item.extra && (type === 'error' || type === 'warning');
+    var badgeHtml = type === 'error'
+      ? '<span class="vd-badge vd-badge-err">未分配</span>'
+      : '<span class="vd-badge vd-badge-warn">差额</span>';
+    // 序号圈 + 产品名 + 状态徽章 + 跳转按钮
+    return '<div class="validation-item validation-item-' + type + '"' +
+      (isClickable ? ' onclick="scrollToDispatchProduct(\'' + item.extra + '\')"' : '') + '>' +
+      '<span class="vd-num-circle">' + (i + 1) + '</span>' +
+      '<span class="vd-label">' + esc(item.label || '') + '</span>' +
+      badgeHtml +
+      (isClickable ? '<span class="vd-jump-btn">👆 跳转定位</span>' : '') +
+      '</div>';
+  }).join('');
+
+  var buttonsHtml = '';
+  if (type === 'error') {
+    buttonsHtml = '<button class="btn btn-primary" onclick="closeDispatchValidationDialog()">我知道了，去补充</button>';
+  } else {
+    buttonsHtml = '<button class="btn btn-outline" onclick="closeDispatchValidationDialog()">取消</button>' +
+      '<button class="btn btn-primary" onclick="confirmDispatchValidation()">继续派单</button>';
+  }
+
+  var overlay = document.createElement('div');
+  overlay.className = 'dispatch-validation-overlay';
+  overlay.id = 'dispatch-validation-modal';
+  overlay.onclick = function(e) { if (e.target === overlay) closeDispatchValidationDialog(); };
+
+  overlay.innerHTML = '<div class="validation-dialog">' +
+    '<div class="validation-dialog-header">' +
+      '<span class="vd-icon">' + icon + '</span>' +
+      '<span class="vd-title" style="color:' + headerColor + '">' + esc(title) + '</span>' +
+      '<button class="vd-close" onclick="closeDispatchValidationDialog()">&times;</button>' +
+    '</div>' +
+    '<div class="validation-dialog-body">' +
+      summaryHtml +
+      (subtitle ? '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">' + esc(subtitle) + '</div>' : '') +
+      itemsHtml +
+    '</div>' +
+    '<div class="validation-dialog-footer">' + buttonsHtml + '</div>' +
+  '</div>';
+
+  document.body.appendChild(overlay);
+}
+
+function closeDispatchValidationDialog() {
+  var modal = document.getElementById('dispatch-validation-modal');
+  if (modal) modal.remove();
+  window._dispatchValidationCallback = null;
+}
+
+function confirmDispatchValidation() {
+  var cb = window._dispatchValidationCallback;
+  closeDispatchValidationDialog();
+  if (typeof cb === 'function') cb();
+}
+
+// 跳转到派单弹窗中的对应产品区域
+function scrollToDispatchProduct(extra) {
+  closeDispatchValidationDialog();
+  if (!extra) return;
+
+  setTimeout(function() {
+    var targetEl = null;
+
+    // 优先定位到整个产品区块（新增的 block 容器）
+    var blockEl = document.getElementById('dispatch-product-block-' + extra);
+    if (blockEl) {
+      targetEl = blockEl;
+    } else if (extra === 'qty') {
+      targetEl = document.getElementById('dispatch-qty-summary-qty');
+    } else if (extra.startsWith('item_')) {
+      targetEl = document.getElementById('dispatch-qty-summary-' + extra);
+    } else if (extra.match(/^\d+$/)) {
+      // 按产品拆分模式
+      targetEl = document.getElementById('dispatch-teams-' + extra);
+      if (!targetEl) targetEl = document.getElementById('dispatch-status-' + extra);
+    }
+
+    if (targetEl) {
+      // 滚动到可视区域中央
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      // 高亮产品区块：红色边框 + 脉冲动画
+      var highlightEl = blockEl || targetEl.closest('[id^="dispatch-product-block"]') || targetEl;
+      highlightEl.classList.add('dispatch-highlight');
+      highlightEl.style.borderColor = 'var(--danger)';
+
+      // 2.5秒后移除高亮
+      setTimeout(function() {
+        highlightEl.classList.remove('dispatch-highlight');
+        highlightEl.style.borderColor = 'transparent';
+      }, 2500);
+
+      // 自动聚焦该产品的第一个数量输入框（提升操作效率）
+      var firstInput = null;
+      if (extra.startsWith('item_')) {
+        var teamContainer = document.getElementById('dispatch-qtyteams-' + extra);
+        if (teamContainer) firstInput = teamContainer.querySelector('.dispatch-qty-input');
+      } else if (extra === 'qty') {
+        var qtyTeamContainer = document.getElementById('dispatch-qtyteams-qty');
+        if (qtyTeamContainer) firstInput = qtyTeamContainer.querySelector('.dispatch-qty-input');
+      }
+      if (firstInput) {
+        setTimeout(function() { firstInput.focus(); }, 400);
+      }
+    }
+  }, 150);
 }
 
 // 按产品模式：点击选择班组
