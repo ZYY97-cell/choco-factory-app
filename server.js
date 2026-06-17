@@ -1073,18 +1073,23 @@ app.get('/api/preparations', requireRole('preparation','supervisor','admin'), fu
   res.json(preps);
 });
 app.post('/api/preparations', requireRole('preparation','admin'), function(req, res) {
+  try {
   var b = req.body;
-  dbRun("INSERT INTO preparations (order_id,preparer_id,prep_date,color_target,color_result,notes) VALUES (" + safeNum(b.order_id) + "," + req.session.user.id + ",'" + safe(b.prep_date||'') + "','" + safe(b.color_target||'') + "','" + safe(b.color_result||'') + "','" + safe(b.notes||'') + "')");
+  if (!b.order_id) return res.status(400).json({ success: false, msg: '缺少 order_id' });
+  dbRun("INSERT INTO preparations (order_id,preparer_id,prep_date,color_target,color_result,notes) VALUES (" + safeNum(b.order_id) + "," + (req.session.user?req.session.user.id:0) + ",'" + safe(b.prep_date||'') + "','" + safe(b.color_target||'') + "','" + safe(b.color_result||'') + "','" + safe(b.notes||'') + "')");
   var pid = getLastId('preparations');
   (b.items||[]).forEach(function(it) {
     dbRun("INSERT INTO preparation_items (prep_id,material_type,material_id,material_name,usage_grams,notes) VALUES (" + pid + ",'" + safe(it.material_type||'other') + "'," + safeNum(it.material_id) + ",'" + safe(it.material_name||'') + "'," + parseFloat(it.usage_grams||0) + ",'" + safe(it.notes||'') + "')");
-    // 库存扣减
     dbRun("UPDATE raw_materials SET stock_qty=stock_qty-" + Math.ceil(parseFloat(it.usage_grams||0)) + " WHERE id=" + safeNum(it.material_id));
-    dbRun("INSERT INTO raw_material_issues (material_id,quantity,issued_to_role,issued_to_name,issued_by,notes) VALUES (" + safeNum(it.material_id) + "," + Math.ceil(parseFloat(it.usage_grams||0)) + ",'preparation','" + safe(req.session.user.real_name) + "'," + req.session.user.id + ",'配料领用')");
+    dbRun("INSERT INTO raw_material_issues (material_id,quantity,issued_to_role,issued_to_name,issued_by,notes) VALUES (" + safeNum(it.material_id) + "," + Math.ceil(parseFloat(it.usage_grams||0)) + ",'preparation','" + safe((req.session.user||{}).real_name||'') + "'," + (req.session.user?req.session.user.id:0) + ",'配料领用')");
   });
-  addLog(req.session.user.id, 'preparation', '配料完成，订单#' + b.order_id);
+  addLog((req.session.user?req.session.user.id:0), 'preparation', '配料完成，订单#' + b.order_id);
   addNotif('team', null, 'new_dispatch', '配料完成可生产', '订单#' + (b.order_id||'') + '配料完成，可开始生产');
   res.json({ success: true, id: pid });
+  } catch(e) {
+    console.error('preparation error:', e.message, e.stack);
+    res.status(500).json({ success: false, msg: e.message });
+  }
 });
 app.get('/api/preparations/:id', requireLogin, function(req, res) {
   var prep = rowToObject(dbQuery("SELECT p.*,o.order_no,pr.name as product_name FROM preparations p LEFT JOIN orders o ON p.order_id=o.id LEFT JOIN products pr ON o.product_id=pr.id WHERE p.id=" + req.params.id));

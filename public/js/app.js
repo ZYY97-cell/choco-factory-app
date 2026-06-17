@@ -649,6 +649,7 @@ async function openDispatch(orderId) {
   }
   window._dispatchItems = items;
   window._dispatchTeams = teams;
+  window._dispatchStats = { stats: dispatchStats, threshold: threshold };  // 缓存统计数据供模式切换时复用
   // 默认模式：按产品拆分
   window._dispatchMode = 'byProduct';
   window._dispatchSelections = {};
@@ -669,19 +670,22 @@ function buildDispatchModal(modal, order, teams, items, dispatchStats, threshold
   
   var renderTeamCard = function(t, extra, showQty) {
     var stat = dispatchStats.find(function(s){return s.team_id===t.id;}) || { dispatch_count: 0, total_quantity: 0 };
-    var otherMin = Math.min.apply(null, dispatchStats.filter(function(s){return s.team_id!==t.id;}).map(function(s){return s.dispatch_count;}));
+    var otherStats = dispatchStats.filter(function(s){return s.team_id!==t.id;}).map(function(s){return s.dispatch_count;});
+    var otherMin = otherStats.length > 0 ? Math.min.apply(null, otherStats) : 0;
     var isWarning = stat.dispatch_count - otherMin >= threshold;
     var cls = 'team-dispatch-card' + (isWarning?' warning':'');
+    var extraStr = extra || '';  // 安全字符串，避免 onclick 拼接时变量引用
     if (showQty) {
       // 按数量拆分模式：带数量输入框
       return '<div class="'+cls+'" data-team-id="'+t.id+'">' +
         '<div class="team-info"><div class="team-name">'+esc(t.name)+' '+(isWarning?'<span class="warning-badge">⚠️ 偏多</span>':'')+'</div>' +
         '<div class="team-stats">本月接单：'+stat.dispatch_count+' 次 | 累计产量：'+(stat.total_quantity||0)+'</div></div>' +
         '<div style="display:flex;align-items:center;gap:6px;margin-top:6px">' +
-        '<input class="form-input dispatch-qty-input" data-team-id="'+t.id+'" data-extra="'+(extra||'')+'" type="number" min="0" placeholder="0" style="width:80px;padding:6px;font-size:13px" oninput="onDispatchQtyChange(this)" value="0">' +
+        '<input class="form-input dispatch-qty-input" data-team-id="'+t.id+'" data-extra="'+extraStr+'" type="number" min="0" placeholder="0" style="width:80px;padding:6px;font-size:13px" oninput="onDispatchQtyChange(this)" value="0">' +
         '<span style="font-size:12px;color:var(--text-secondary)">件</span></div></div>';
     }
-    return '<div class="'+cls+'" onclick="selectTeam(this,'+t.id+','+(extra||'\'')+')" data-team-id="'+t.id+'" data-extra="'+(extra||'')+'">' +
+    // 按产品拆分模式：点击选择班组 — extra 必须用引号包裹为字符串
+    return '<div class="'+cls+'" onclick="selectTeam(this,'+t.id+',\''+extraStr+'\')" data-team-id="'+t.id+'" data-extra="'+extraStr+'">' +
       '<div class="team-info"><div class="team-name">'+esc(t.name)+' '+(isWarning?'<span class="warning-badge">⚠️ 偏多</span>':'')+'</div>' +
       '<div class="team-stats">本月接单：'+stat.dispatch_count+' 次 | 累计产量：'+(stat.total_quantity||0)+'</div></div>' +
       '<div style="font-size:20px;color:var(--border)">○</div></div>';
